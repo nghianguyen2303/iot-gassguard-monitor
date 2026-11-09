@@ -369,7 +369,7 @@ Công thức quy đổi MQ-2 sang ppm dùng đường đặc tuyến LPG trong d
 
 | Thành viên | MSSV | GitHub | Phụ trách |
 |---|---|---|---|
-| Đỗ Bình Minh | B23DCCN542 | DoBinhMinh | Phân tích bài toán, yêu cầu; phần cứng (linh kiện, lắp mạch, sơ đồ – `hardware/`); firmware ESP32 (`firmware/`); giao diện web React (`frontend/`); kiểm thử với ESP32 thật H1–H10 |
+| Đỗ Bình Minh | B23DCCN542 | [DoBinhMinh](https://github.com/DoBinhMinh) | Phân tích bài toán, yêu cầu; phần cứng (linh kiện, lắp mạch, sơ đồ – `hardware/`); firmware ESP32 (`firmware/`); giao diện web React (`frontend/`); kiểm thử với ESP32 thật H1–H10 |
 | Nguyễn Đại Nghĩa | B23DCCN598 | [nghianguyen2303](https://github.com/nghianguyen2303) | Backend Spring Boot, cơ sở dữ liệu, API (`backend/`, `database/`); broker Mosquitto, TLS, Docker Compose (`deployment/`); kiểm thử tự động, thiết bị mô phỏng (`tests/`) |
 
 Cả hai thành viên phối hợp: báo cáo, slide, video demo (`docs/`). Chi tiết mức tham gia từng hạng mục: Bảng 2 trong báo cáo.
