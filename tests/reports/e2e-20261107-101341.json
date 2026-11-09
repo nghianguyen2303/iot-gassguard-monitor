@@ -1,0 +1,680 @@
+{
+  "kind": "e2e",
+  "title": "Báo cáo kiểm thử chức năng (7.1) và bảo mật (4.5) – GasGuard",
+  "started": "2026-11-07T10:13:41.749217+07:00",
+  "env": {
+    "API": "http://localhost:8080",
+    "WebSocket": "ws://localhost:8080/ws",
+    "MQTT": "localhost:1883",
+    "Máy chạy test": "Windows 10 / Python 3.11.7"
+  },
+  "cases": [
+    {
+      "id": "F1",
+      "name": "Đăng nhập và phân quyền theo vai trò",
+      "req": "7.1 · 4.4a · 8.4-1",
+      "status": "PASS",
+      "duration": 27.76398015022278,
+      "steps": [
+        {
+          "ok": true,
+          "text": "e2e_owner_1107101341 đăng nhập được, /me trả vai trò OWNER"
+        },
+        {
+          "ok": true,
+          "text": "e2e_viewer_1107101341 đăng nhập được, /me trả vai trò VIEWER"
+        },
+        {
+          "ok": true,
+          "text": "admin đăng nhập được, vai trò ADMIN"
+        },
+        {
+          "ok": true,
+          "text": "Sai mật khẩu -> HTTP 401 (mong đợi 401)"
+        },
+        {
+          "ok": true,
+          "text": "Quản lý người dùng: VIEWER 403, OWNER 403, ADMIN 200 (mong đợi 403/403/200)"
+        },
+        {
+          "ok": true,
+          "text": "VIEWER đăng ký thiết bị -> HTTP 403 (mong đợi 403)"
+        },
+        {
+          "ok": true,
+          "text": "Tự đăng ký tài khoản -> HTTP 201, vai trò mặc định VIEWER"
+        },
+        {
+          "ok": true,
+          "text": "Sau đăng xuất, token cũ -> HTTP 401 (mong đợi 401)"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F2",
+      "name": "Đăng ký, cấp xác thực và kích hoạt thiết bị",
+      "req": "7.1 · 4.4b · 8.4-2",
+      "status": "PASS",
+      "duration": 16.818198204040527,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Đăng ký e2e-1107101341 -> HTTP 201, trạng thái REGISTERED"
+        },
+        {
+          "ok": true,
+          "text": "Đăng ký trùng mã -> HTTP 409 (mong đợi 409)"
+        },
+        {
+          "ok": true,
+          "text": "Cấp thông tin xác thực riêng -> username = clientId = e2e-1107101341, mật khẩu 24 ký tự"
+        },
+        {
+          "ok": true,
+          "text": "Trạng thái PROVISIONED sau khi cấp"
+        },
+        {
+          "ok": true,
+          "text": "Xem lại thông tin xác thực KHÔNG trả mật khẩu (chỉ hiện 1 lần)"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị kết nối broker bằng thông tin riêng -> CONNACK 0"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin đầu tiên -> tự kích hoạt ACTIVE, kết nối ONLINE"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị thứ 2 (e2e-1107101341-b, chủ khác) kết nối bằng mật khẩu riêng của nó"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F3",
+      "name": "Thiết bị gửi telemetry, backend kiểm tra, lưu và truy vấn",
+      "req": "7.1 · 4.4c · 8.4-3",
+      "status": "PASS",
+      "duration": 10.976978302001953,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Lưu đủ 10 bản tin x 2 chỉ số = 20 điểm"
+        },
+        {
+          "ok": true,
+          "text": "Giá trị gas lưu đúng như thiết bị gửi"
+        },
+        {
+          "ok": true,
+          "text": "Đơn vị chuẩn hóa: {'gas': 'ppm', 'temp': 'C'}"
+        },
+        {
+          "ok": true,
+          "text": "Mỗi điểm có seq (phát hiện mất bản tin)"
+        },
+        {
+          "ok": true,
+          "text": "Giá trị hiện tại (latest) gas = 64.0"
+        },
+        {
+          "ok": true,
+          "text": "Thống kê: count 10, min 55.0, max 64.0, avg 59.5"
+        },
+        {
+          "ok": true,
+          "text": "Dữ liệu biểu đồ (series) -> HTTP 200"
+        },
+        {
+          "ok": true,
+          "text": "Xuất CSV -> HTTP 200, 21 dòng"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F4",
+      "name": "Dashboard cập nhật dữ liệu thời gian thực (WebSocket)",
+      "req": "7.1 · 4.4d · 8.4-4",
+      "status": "PASS",
+      "duration": 4.537516832351685,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Dashboard (STOMP/WebSocket) kết nối bằng JWT"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin vừa gửi xuất hiện trên kênh realtime của dashboard"
+        },
+        {
+          "ok": true,
+          "text": "Độ trễ thiết bị publish -> dashboard nhận: 27 ms"
+        },
+        {
+          "ok": true,
+          "text": "API dashboard: e2e-1107101341 trực tuyến, gas hiện tại 77.7"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F5",
+      "name": "Gửi lệnh điều khiển và nhận xác nhận (ACK)",
+      "req": "7.1 · 4.4e · 8.4-5",
+      "status": "PASS",
+      "duration": 25.11549186706543,
+      "steps": [
+        {
+          "ok": true,
+          "text": "FAN_SET bật -> HTTP 201, trạng thái SUCCESS, độ trễ 68 ms"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị nhận đúng lệnh (commandId khớp)"
+        },
+        {
+          "ok": true,
+          "text": "ACK kèm trạng thái mới: {'fan': True, 'buzzer': False, 'fanMode': 'MANUAL', 'buzzerMode': 'AUTO'}"
+        },
+        {
+          "ok": true,
+          "text": "Backend cập nhật trạng thái quạt = BẬT"
+        },
+        {
+          "ok": true,
+          "text": "PING -> SUCCESS (58 ms)"
+        },
+        {
+          "ok": true,
+          "text": "Lịch sử lệnh lưu cả 2 lệnh (người gửi 4)"
+        },
+        {
+          "ok": true,
+          "text": "Lệnh không hỗ trợ -> HTTP 400 (mong đợi 400)"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị không phản hồi -> lệnh chuyển TIMEOUT sau 10 s"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F6",
+      "name": "Thay đổi cấu hình thiết bị từ xa",
+      "req": "4.4b · 8.4-6",
+      "status": "PASS",
+      "duration": 6.264268398284912,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Lưu cấu hình v1 -> HTTP 200"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị nhận cấu hình (bản tin retained) với ngưỡng 500"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị xác nhận APPLIED, phiên bản áp dụng 1"
+        },
+        {
+          "ok": true,
+          "text": "Cấu hình sai (chu kỳ 0 s) -> HTTP 400 (mong đợi 400)"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F7",
+      "name": "Phát hiện thiết bị offline và trở lại online",
+      "req": "7.1 · 4.4d · 8.4-7",
+      "status": "PASS",
+      "duration": 9.046257495880127,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Ngắt đột ngột (mất điện) -> OFFLINE sau 2.0 s (LWT của broker)"
+        },
+        {
+          "ok": true,
+          "text": "Sinh cảnh báo mất kết nối (OFFLINE)"
+        },
+        {
+          "ok": true,
+          "text": "Gửi lệnh khi offline -> HTTP 409 DEVICE_OFFLINE (mong đợi 409)"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị kết nối lại"
+        },
+        {
+          "ok": true,
+          "text": "Trạng thái trở lại ONLINE"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F8",
+      "name": "Sinh cảnh báo theo luật và xử lý cảnh báo",
+      "req": "7.1 · 4.4d · 8.4-8",
+      "status": "PASS",
+      "duration": 18.716792345046997,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Gas 1200 ppm -> cảnh báo ['CRITICAL', 'WARNING'] theo luật mặc định (>400, >1000)"
+        },
+        {
+          "ok": true,
+          "text": "Nội dung: Khí gas 1200 ppm > 1000 ppm (Rò rỉ gas nguy hiểm)"
+        },
+        {
+          "ok": true,
+          "text": "Dashboard nhận thông báo cảnh báo mới qua WebSocket"
+        },
+        {
+          "ok": true,
+          "text": "Người không có quyền xác nhận cảnh báo -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "Chủ thiết bị xác nhận -> ACKNOWLEDGED bởi e2e_owner_1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Gas trở lại bình thường -> cảnh báo được đánh dấu đã hết điều kiện"
+        },
+        {
+          "ok": true,
+          "text": "Xử lý xong -> RESOLVED, ghi chú 'Đã thông gió'"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "F9",
+      "name": "Khóa (tạm ngưng) và ngừng sử dụng thiết bị",
+      "req": "7.1 · 4.4b · 4.5 · 8.4-10",
+      "status": "PASS",
+      "duration": 19.820837259292603,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Tạm khóa không ghi lý do -> HTTP 400 (bắt buộc lý do)"
+        },
+        {
+          "ok": true,
+          "text": "Tạm khóa -> SUSPENDED"
+        },
+        {
+          "ok": true,
+          "text": "Broker ngắt ngay phiên MQTT đang mở (mã 0)"
+        },
+        {
+          "ok": true,
+          "text": "Kết nối lại khi đang tạm khóa -> CONNACK 135 (bị từ chối)"
+        },
+        {
+          "ok": true,
+          "text": "Gửi lệnh tới thiết bị bị khóa -> HTTP 409"
+        },
+        {
+          "ok": true,
+          "text": "Mở khóa (RESUME) -> ACTIVE, thiết bị kết nối lại được"
+        },
+        {
+          "ok": true,
+          "text": "Ngừng sử dụng -> DECOMMISSIONED"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị đã ngừng sử dụng kết nối -> CONNACK 135 (bị từ chối vĩnh viễn)"
+        },
+        {
+          "ok": true,
+          "text": "Không còn trong danh sách thiết bị đang dùng"
+        },
+        {
+          "ok": true,
+          "text": "Dữ liệu lịch sử vẫn được giữ để tra cứu"
+        },
+        {
+          "ok": true,
+          "text": "Không thể kích hoạt lại thiết bị đã ngừng sử dụng -> HTTP 409"
+        },
+        {
+          "ok": true,
+          "text": "Audit log ghi 3 thao tác vòng đời (khóa / mở khóa / ngừng sử dụng) kèm lý do"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S1",
+      "name": "Người dùng không truy cập được thiết bị của người khác",
+      "req": "4.5 · 8.4-9",
+      "status": "PASS",
+      "duration": 21.997737169265747,
+      "steps": [
+        {
+          "ok": true,
+          "text": "GET /api/devices/{thiết bị người khác} -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "GET /api/devices/{thiết bị người khác}/telemetry -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "GET /api/devices/{thiết bị người khác}/config -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "POST /api/devices/{thiết bị người khác}/commands -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "PUT /api/devices/{thiết bị người khác}/config -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "POST /api/devices/{thiết bị người khác}/lifecycle -> HTTP 403"
+        },
+        {
+          "ok": true,
+          "text": "Danh sách thiết bị không lộ thiết bị của người khác"
+        },
+        {
+          "ok": true,
+          "text": "Đăng ký kênh realtime của thiết bị người khác -> không nhận được dữ liệu ['ERROR\\nmessage:Không có quyền xem thiết bị e2e-1107101341-b\\ncontent-length:0\\n\\n']"
+        },
+        {
+          "ok": true,
+          "text": "Audit log ghi 8 lần bị từ chối của e2e_owner_1107101341"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S2",
+      "name": "Người được chia sẻ chỉ được xem, không được điều khiển",
+      "req": "4.4a · 4.5",
+      "status": "PASS",
+      "duration": 14.519181489944458,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Chủ thiết bị chia sẻ cho e2e_viewer_1107101341 -> HTTP 201"
+        },
+        {
+          "ok": true,
+          "text": "Người xem đọc được thiết bị (canManage=False)"
+        },
+        {
+          "ok": true,
+          "text": "Người xem đọc được dữ liệu"
+        },
+        {
+          "ok": true,
+          "text": "Người xem POST /commands -> HTTP 403 (mong đợi 403, kiểm tra ở backend)"
+        },
+        {
+          "ok": true,
+          "text": "Người xem PUT /config -> HTTP 403 (mong đợi 403, kiểm tra ở backend)"
+        },
+        {
+          "ok": true,
+          "text": "Người xem POST /credentials/rotate -> HTTP 403 (mong đợi 403, kiểm tra ở backend)"
+        },
+        {
+          "ok": true,
+          "text": "Người xem POST /lifecycle -> HTTP 403 (mong đợi 403, kiểm tra ở backend)"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S3",
+      "name": "API từ chối token thiếu, sai, giả mạo, hết hạn hoặc đã thu hồi",
+      "req": "4.5",
+      "status": "PASS",
+      "duration": 21.180498123168945,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Không có token -> HTTP 401"
+        },
+        {
+          "ok": true,
+          "text": "Token rác -> HTTP 401"
+        },
+        {
+          "ok": true,
+          "text": "Token bị sửa chữ ký -> HTTP 401"
+        },
+        {
+          "ok": true,
+          "text": "Tự sửa vai trò trong token thành ADMIN -> HTTP 401"
+        },
+        {
+          "ok": true,
+          "text": "Token đúng chữ ký nhưng đã hết hạn -> HTTP 401"
+        },
+        {
+          "ok": true,
+          "text": "Token sau khi đăng xuất bị thu hồi -> 401"
+        },
+        {
+          "ok": true,
+          "text": "WebSocket từ chối CONNECT với token sai"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S4",
+      "name": "Broker từ chối kết nối sai và publish/subscribe sai topic",
+      "req": "4.5 · 4.3",
+      "status": "PASS",
+      "duration": 5.701945781707764,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Thiết bị A publish vào topic của thiết bị B -> PUBACK 135 (Not authorized)"
+        },
+        {
+          "ok": true,
+          "text": "Dữ liệu giả không vào được hệ thống (2 -> 2 điểm)"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị tự publish lệnh vào topic cmd -> PUBACK 135"
+        },
+        {
+          "ok": true,
+          "text": "Subscribe lệnh của thiết bị B -> SUBACK [135]"
+        },
+        {
+          "ok": true,
+          "text": "Subscribe wildcard toàn hệ thống -> SUBACK [135]"
+        },
+        {
+          "ok": true,
+          "text": "Kết nối sai mật khẩu -> CONNACK 135"
+        },
+        {
+          "ok": true,
+          "text": "Dùng mật khẩu của A để đăng nhập tên B -> CONNACK 135"
+        },
+        {
+          "ok": true,
+          "text": "Đúng mật khẩu nhưng clientId khác mã thiết bị -> CONNACK 135"
+        },
+        {
+          "ok": true,
+          "text": "Kết nối ẩn danh -> CONNACK 135"
+        },
+        {
+          "ok": true,
+          "text": "Thiết bị hợp lệ vẫn hoạt động bình thường"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S5",
+      "name": "Hệ thống kiểm tra và từ chối dữ liệu không hợp lệ",
+      "req": "4.5 · 4.4c",
+      "status": "PASS",
+      "duration": 10.294221878051758,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Bản tin lỗi MALFORMED_JSON bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi MISSING_TS bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi TS_IN_FUTURE bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi TS_TOO_OLD bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi OUT_OF_RANGE bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi WRONG_UNIT bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi UNKNOWN_FIELD bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi DEVICE_ID_MISMATCH bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Bản tin lỗi PAYLOAD_TOO_LARGE bị từ chối (bộ đếm +1)"
+        },
+        {
+          "ok": true,
+          "text": "Không bản tin lỗi nào được lưu vào CSDL"
+        },
+        {
+          "ok": true,
+          "text": "REST: dữ liệu sai -> HTTP 400, lỗi theo trường ['name', 'deviceCode']"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S6",
+      "name": "Chống dò mật khẩu: khóa tạm sau 5 lần sai",
+      "req": "4.5 · 4.4a",
+      "status": "PASS",
+      "duration": 17.84157919883728,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Sai mật khẩu 5 lần liên tiếp -> [401, 401, 401, 401, 423] (lần thứ 5 kích hoạt khóa tạm 15 phút: 423)"
+        },
+        {
+          "ok": true,
+          "text": "Lần 6 dù ĐÚNG mật khẩu vẫn bị khóa tạm -> HTTP 423"
+        },
+        {
+          "ok": true,
+          "text": "Admin mở khóa -> đăng nhập lại được (200)"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S7",
+      "name": "Thu hồi thông tin xác thực: mật khẩu cũ của thiết bị hết hiệu lực",
+      "req": "4.5 · 4.4b",
+      "status": "PASS",
+      "duration": 3.1379640102386475,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Đổi mật khẩu thiết bị (rotate) -> cấp mật khẩu mới"
+        },
+        {
+          "ok": true,
+          "text": "Phiên MQTT dùng mật khẩu cũ bị ngắt"
+        },
+        {
+          "ok": true,
+          "text": "Mật khẩu cũ bị từ chối -> thiết bị/kẻ lấy cắp mật khẩu không gửi dữ liệu được"
+        },
+        {
+          "ok": true,
+          "text": "Mật khẩu mới hoạt động"
+        }
+      ],
+      "error": null
+    },
+    {
+      "id": "S8",
+      "name": "Audit log thao tác quan trọng và mật khẩu được băm",
+      "req": "4.5",
+      "status": "PASS",
+      "duration": 4.5213541984558105,
+      "steps": [
+        {
+          "ok": true,
+          "text": "Audit có 'DEVICE_REGISTER' cho e2e-1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Audit có 'DEVICE_PROVISION' cho e2e-1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Audit có 'COMMAND_SEND' cho e2e-1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Audit có 'DEVICE_CONFIG_UPDATE' cho e2e-1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Audit có 'DEVICE_CREDENTIAL_ROTATE' cho e2e-1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Audit có 'DEVICE_SHARE_ADD' cho e2e-1107101341"
+        },
+        {
+          "ok": true,
+          "text": "Các hành động đã ghi: COMMAND_SEND, DATA_EXPORT, DEVICE_AUTO_ACTIVATED, DEVICE_CONFIG_UPDATE, DEVICE_CREDENTIAL_ROTATE, DEVICE_PROVISION, DEVICE_REGISTER, DEVICE_SHARE_ADD"
+        },
+        {
+          "ok": true,
+          "text": "API người dùng không trả mật khẩu/băm"
+        },
+        {
+          "ok": true,
+          "text": "CSDL lưu BCrypt: $2a$12$… (không có mật khẩu thuần)"
+        }
+      ],
+      "error": null
+    }
+  ],
+  "sections": []
+}
