@@ -1,5 +1,34 @@
 # Phần cứng GasGuard – sơ đồ lắp ráp
 
+Thư mục gồm: sơ đồ khối, sơ đồ nguyên lý nối dây, danh sách linh kiện, hình ảnh nguyên mẫu (mục dưới) và bảng lắp ráp
+chi tiết từng dây trên breadboard (từ mục *Linh kiện* trở đi). Chân ESP32 khớp với `firmware/gas-node/config.h`.
+
+## Sơ đồ khối
+
+![Sơ đồ khối phần cứng](so-do-khoi.jpg)
+
+Nguồn USB 5 V cấp cho ESP32 (ray 5 V qua chân VIN, ray 3,3 V từ LDO trên board). MQ-2 đọc qua cầu phân áp 10K/20K vào
+ADC D34; DS18B20 trên bus 1-Wire D4; relay quạt D33; còi qua transistor 2N2222 ở D25; LED đỏ D26, LED xanh D27.
+
+## Sơ đồ nguyên lý (nối cảm biến và cơ cấu chấp hành)
+
+![Sơ đồ nguyên lý](so-do-nguyen-ly.jpg)
+
+## Hình ảnh nguyên mẫu
+
+| Mạch đã lắp ráp | Khi báo động: LED đỏ sáng, quạt chạy |
+|---|---|
+| ![Mạch đã lắp ráp](nguyen-mau-lap-rap.jpg) | ![Khi báo động](nguyen-mau-bao-dong.jpg) |
+
+Serial Monitor khi kết nối lại broker, gửi bù số đo lưu lúc mất mạng rồi tự bật quạt khi gas vượt ngưỡng:
+
+![Serial Monitor](nguyen-mau-serial.jpg)
+
+An toàn: toàn bộ mạch dùng điện áp thấp 5 V và 3,3 V từ USB, không đấu nối điện lưới 220 V; khi thử chỉ xả một lượng
+nhỏ khí từ bật lửa gas (không đánh lửa) ở nơi thoáng.
+
+## Lắp ráp chi tiết
+
 **Quy ước:**
 - Breadboard MB-102 830 lỗ đặt ngang. Hàng a ở mép dưới, hàng j ở mép trên, cột 1 bên trái. Ray dưới sát hàng a, ray trên sát hàng j.
 - ESP32 đặt ngoài breadboard, cổng USB hướng lên, chân đếm từ phía USB xuống.
