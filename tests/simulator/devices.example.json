@@ -1,0 +1,4 @@
+[
+  { "deviceId": "sim-001", "password": "dien-mat-khau-mqtt-cua-sim-001" },
+  { "deviceId": "sim-002", "password": "dien-mat-khau-mqtt-cua-sim-002" }
+]
