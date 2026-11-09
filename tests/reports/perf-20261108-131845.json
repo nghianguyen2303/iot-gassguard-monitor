@@ -1,0 +1,5943 @@
+{
+ "kind": "perf",
+ "title": "Báo cáo kiểm thử phi chức năng (7.2) – GasGuard",
+ "started": "2026-11-08T13:18:45.890975+07:00",
+ "env": {
+  "API": "http://127.0.0.1:8080",
+  "WebSocket": "ws://127.0.0.1:8080/ws",
+  "MQTT": "127.0.0.1:1883",
+  "MQTT/TLS": "127.0.0.1:8884",
+  "Web HTTPS": "https://127.0.0.1:8443",
+  "Máy chạy test": "Windows 10 / Python 3.11.7"
+ },
+ "cases": [],
+ "sections": [
+  {
+   "title": "Tổng hợp",
+   "markdown": "| Mã | Chỉ tiêu | Kết quả đo | So với mục tiêu |\n|---|---|---|---|\n| P1 | Độ trễ từ cảm biến đến dashboard | P95 24.5 ms, nhận 200/200 | ✅ Đạt |\n| P2 | Độ trễ của lệnh điều khiển | P95 151.9 ms, 50/50 thành công | ✅ Đạt |\n| P3 | Tỷ lệ mất bản tin | QoS1 mất 0.00 % | ✅ Đạt |\n| P4 | Khả năng hoạt động sau khi mất và khôi phục mạng | OFFLINE sau 1.0 s, gửi bù 20/20 | ✅ Đạt |\n| P5 | Khả năng xử lý bản tin trùng lặp | lưu 200/200, bỏ qua 400 trùng | ✅ Đạt |\n| P6 | Mức sử dụng CPU và bộ nhớ | RAM backend max 375 MiB | ✅ Đạt |\n| P7 | Độ ổn định khi chạy liên tục | mất 0.000 %, RAM +3.4 % | ✅ Đạt |\n| P8 | Số lượng thiết bị / bản tin hệ thống xử lý được | 100 thiết bị, mất 493 bản tin, P95 3525.0 ms | ❌ Chưa đạt |"
+  },
+  {
+   "title": "P1 – Độ trễ từ cảm biến đến dashboard",
+   "markdown": "**Phương pháp đo.** 1 thiết bị mô phỏng gửi 200 bản tin telemetry QoS1, mỗi 200 ms, ghi thời điểm đo `ts`. Một client WebSocket/STOMP đăng nhập giống trình duyệt, đăng ký kênh realtime của thiết bị và ghi thời điểm nhận từng bản tin. Độ trễ = thời điểm dashboard nhận − `ts`. Backend cũng ghi `receivedAt` để tách phần MQTT/xử lý.\n\n**Dữ liệu đo.**\n\n| Đại lượng (ms) | Số mẫu | Min | TB | P50 | P95 | Max |\n|---|---|---|---|---|---|---|\n| Thiết bị → backend nhận (MQTT + kiểm tra) | 200 | 1.0 | 4.8 | 4.9 | 7.4 | 11.2 |\n| Thiết bị → dashboard nhận (đầu-cuối) | 200 | 6.1 | 15.9 | 14.4 | 24.5 | 196.3 |\n\nĐã gửi 200 bản tin, dashboard nhận 200 bản tin.\n\n**Nhận xét.** P95 đầu-cuối 24.5 ms, mục tiêu ≤ 1000 ms → đạt. Phần lớn độ trễ nằm ở chặng thiết bị → backend (P50 4.9 ms); chặng đẩy WebSocket chỉ thêm khoảng 9.5 ms. Với ESP32 thật qua WiFi, độ trễ tăng thêm thời gian truyền WiFi (thường 5–50 ms); xem cột Độ trễ TB ở tab Dữ liệu của thiết bị thật."
+  },
+  {
+   "title": "P2 – Độ trễ của lệnh điều khiển",
+   "markdown": "**Phương pháp đo.** Gửi 50 lệnh (FAN_SET bật/tắt xen kẽ PING) qua REST API với `waitMs=5000`. Backend lưu lệnh, publish xuống topic `cmd` (QoS1) và ghi `latencyMs` = thời điểm nhận `cmd/ack` − thời điểm gửi. Phía client đo thêm thời gian khứ hồi toàn bộ của lời gọi API (người dùng bấm nút → thấy kết quả).\n\n**Dữ liệu đo.**\n\n| Đại lượng (ms) | Số mẫu | Min | TB | P50 | P95 | Max |\n|---|---|---|---|---|---|---|\n| Backend gửi → nhận ACK | 50 | 7 | 94.8 | 53.5 | 65.1 | 2169 |\n| Khứ hồi API (người dùng) | 50 | 120.2 | 182.1 | 139.7 | 151.9 | 2301.0 |\n\nKết quả lệnh: {'SUCCESS': 50}\n\n**Nhận xét.** 50/50 lệnh thành công; P95 khứ hồi 151.9 ms, mục tiêu ≤ 1000 ms → đạt. Chênh lệch giữa hai dòng là thời gian lưu CSDL, kiểm tra quyền và ghi audit log."
+  },
+  {
+   "title": "P3 – Tỷ lệ mất bản tin",
+   "markdown": "**Phương pháp đo.** Mỗi mức QoS: 1 thiết bị mô phỏng gửi 1000 bản tin liên tục với tốc độ 50 bản tin/giây (nhanh hơn nhiều lần thực tế 1 bản tin / 5 s). Đếm số bản tin backend đã lưu trong CSDL trong khoảng thời gian gửi. Tỷ lệ mất = (gửi − lưu) / gửi. Cột cuối là ước lượng của chính hệ thống dựa trên khoảng trống `seq` (hiển thị ở tab Dữ liệu của web).\n\n**Dữ liệu đo.**\n\n| Chế độ | Đã gửi | Tốc độ | Đã lưu | Mất (đếm) | Mất (ước lượng theo seq) |\n|---|---|---|---|---|---|\n| QoS 1 | 1000 | 50/s | 1000 | 0.00 % | 0.00 % |\n| QoS 0 | 1000 | 50/s | 1000 | 0.00 % | 0.00 % |\n\n**Nhận xét.** Telemetry dùng QoS1: không mất bản tin nào (mục tiêu 0 %). QoS0 chỉ dùng cho heartbeat vì mất 1 heartbeat không ảnh hưởng (backend chỉ đánh OFFLINE sau 30 s không có tín hiệu). Chỉ số ước lượng theo seq khớp với số đếm thực tế, chứng tỏ có thể dùng để theo dõi thiết bị thật."
+  },
+  {
+   "title": "P4 – Khả năng hoạt động sau khi mất và khôi phục mạng",
+   "markdown": "**Phương pháp đo.** (a) Ngắt đột ngột kết nối TCP của thiết bị (giống rút điện / mất WiFi, không gửi DISCONNECT), đo thời gian đến khi backend chuyển OFFLINE. Trong 20 s mất mạng thiết bị vẫn đo mỗi giây và lưu đệm (giống firmware: bộ đệm 120 bản đo), kết nối lại thì gửi bù kèm thời điểm đo gốc; đếm số bản đo được lưu. (b) Khởi động lại broker MQTT trong khi thiết bị gửi 2 bản tin/giây; đo thời gian backend và thiết bị tự kết nối lại và đếm bản tin bị mất. (c) Khởi động lại backend trong khi thiết bị vẫn gửi; đếm bản tin được lưu sau khi backend chạy lại.\n\n**Dữ liệu đo.**\n\n| Tình huống | Đại lượng | Giá trị | Cơ chế |\n|---|---|---|---|\n| Thiết bị mất điện / mất WiFi đột ngột | OFFLINE sau | 1.0 s | LWT của broker |\n| Thiết bị kết nối lại | ONLINE sau | 0.1 s | bản tin status ONLINE |\n| Dữ liệu đo trong 20 s mất mạng | Đã lưu sau khi gửi bù | 20/20 | giữ đúng thời điểm đo gốc |\n| Broker khởi động lại (`docker restart iot-mosquitto`) | Backend + thiết bị kết nối lại sau | 4.0 s | tự kết nối lại |\n| Bản tin QoS1 gửi trong lúc broker gián đoạn | Đã lưu | 24/24 | client giữ hàng đợi và gửi lại |\n| Backend khởi động lại (`docker restart iot-backend`) | Backend hoạt động lại sau | 16.2 s | phiên MQTT bền |\n| Bản tin gửi trong lúc backend ngừng | Đã lưu | 50/50 | broker xếp hàng QoS1 cho backend |\n\n**Nhận xét.** Mất kết nối đột ngột được phát hiện sau 1.0 s nhờ LWT (mục tiêu ≤ 30 s; nếu không có LWT, watchdog backend vẫn đánh OFFLINE sau 30 s không có tín hiệu). Dữ liệu trong thời gian mất mạng không bị mất vì thiết bị đệm và gửi bù, CSDL không trùng nhờ khóa (thiết bị, chỉ số, thời điểm). Khi broker gián đoạn, backend tự kết nối lại (client MQTT mới, giãn dần 1 → 30 s). Backend dùng phiên MQTT bền (cleanSession=false): trong lúc backend hoặc broker khởi động lại, broker giữ đăng ký và xếp hàng bản tin QoS1 nên dữ liệu không mất."
+  },
+  {
+   "title": "P5 – Khả năng xử lý bản tin trùng lặp",
+   "markdown": "**Phương pháp đo.** Gửi 200 bản tin khác nhau, sau đó gửi lại đúng 200 bản tin đó lần nữa (cùng `seq`, cùng `ts`), mô phỏng QoS1 giao lại hoặc thiết bị gửi bù trùng sau khi mất mạng. Đếm số bản ghi trong CSDL và bộ đếm `duplicateReadingsIgnored` của backend (mỗi bản tin có 2 chỉ số gas + temp).\n\n**Dữ liệu đo.**\n\n| Bản tin khác nhau | Tổng đã gửi | Đã lưu (gas) | Số đo trùng bị bỏ qua |\n|---|---|---|---|\n| 200 | 400 | 200 | 400 |\n\n**Nhận xét.** CSDL lưu đúng 200/200 bản tin, không có bản ghi trùng; 400 số đo trùng bị bỏ qua nhờ ràng buộc UNIQUE(device_id, metric, ts) + INSERT … ON CONFLICT DO NOTHING. Cảnh báo cũng không bị sinh lặp vì cảnh báo đang mở được gộp theo (thiết bị, loại, luật)."
+  },
+  {
+   "title": "P6 – Mức sử dụng CPU và bộ nhớ",
+   "markdown": "**Phương pháp đo.** Lấy mẫu mỗi ~2 s bằng `docker stats` cho từng thành phần, lúc nghỉ và trong từng mức tải của P8. CPU tính theo % một nhân (100 % = 1 nhân).\n\n**Dữ liệu đo.**\n\n| Số thiết bị | CPU backend TB % | CPU backend max % | RAM backend max (MiB) | CPU broker TB % | RAM broker max (MiB) | CPU CSDL TB % | RAM CSDL max (MiB) |\n|---|---|---|---|---|---|---|---|\n| 0 (nghỉ) | 7.4 | 10.9 | 370.0 | 0.2 | 1.7 | 0.3 | 66.0 |\n| 10 | 37.6 | 246.7 | 371.5 | 0.9 | 1.8 | 12.0 | 68.4 |\n| 50 | 49.4 | 182.8 | 373.2 | 2.8 | 2.5 | 22.5 | 71.7 |\n| 100 | 67.4 | 160.2 | 374.6 | 3.7 | 3.5 | 37.2 | 81.7 |\n\n**Nhận xét.** Broker Mosquitto rất nhẹ (vài MiB RAM). Backend Java dùng nhiều RAM nhất nhưng bị giới hạn heap 384 MB (`JAVA_OPTS`) nên vừa với máy 8 GB RAM; CPU tăng gần tuyến tính theo số bản tin/giây. Thiết bị ESP32 (firmware) dùng khoảng 15 % RAM và 74 % flash theo kết quả biên dịch."
+  },
+  {
+   "title": "P7 – Độ ổn định khi chạy liên tục",
+   "markdown": "**Phương pháp đo.** 5 thiết bị mô phỏng, mỗi thiết bị gửi 1 bản tin/giây (5 lần dày hơn cấu hình mặc định 5 s) liên tục 10 phút. Mỗi phút đếm bản tin đã gửi / đã lưu, P95 độ trễ thiết bị → backend (bộ đếm của backend), số bản tin bị từ chối, RAM của backend.\n\n**Dữ liệu đo.**\n\n| Phút | Đã gửi | Đã lưu | Mất | P95 độ trễ (ms) | Bị từ chối | RAM backend (MiB) |\n|---|---|---|---|---|---|---|\n| 1 | 300 | 300 | 0.00 % | 3964.0 | 0 | 358 |\n| 2 | 300 | 300 | 0.00 % | 475.0 | 0 | 360 |\n| 3 | 300 | 300 | 0.00 % | 100.0 | 0 | 362 |\n| 4 | 300 | 300 | 0.00 % | 117.0 | 0 | 365 |\n| 5 | 300 | 300 | 0.00 % | 153.0 | 0 | 366 |\n| 6 | 300 | 300 | 0.00 % | 184.0 | 0 | 367 |\n| 7 | 300 | 300 | 0.00 % | 184.0 | 0 | 367 |\n| 8 | 300 | 300 | 0.00 % | 163.0 | 0 | 368 |\n| 9 | 300 | 300 | 0.00 % | 133.0 | 0 | 368 |\n| 10 | 300 | 300 | 0.00 % | 94.0 | 0 | 370 |\n\nTổng: gửi 3000, lưu 3000, mất 0.000 %. Thời gian chạy 628 s.\n\n**Nhận xét.** Trong 10 phút không mất bản tin (0.000 %), không có lỗi, độ trễ ổn định; RAM backend thay đổi +3.4 % giữa phút đầu và phút cuối (heap giới hạn 384 MB nên không tăng vô hạn). Có thể chạy dài hơn bằng `--stability-min 60`."
+  },
+  {
+   "title": "P8 – Số lượng thiết bị / bản tin hệ thống xử lý được",
+   "markdown": "**Phương pháp đo.** Tăng dần số thiết bị mô phỏng kết nối đồng thời (10, 50, 100); mỗi thiết bị gửi 1 bản tin/giây (QoS1, mỗi bản tin 2 chỉ số) trong 60 s. Đo thông lượng backend chấp nhận, số bản tin lưu được, tỷ lệ mất, P95 độ trễ thiết bị → backend.\n\n**Dữ liệu đo.**\n\n| Số thiết bị | Bản tin gửi/s | Backend xử lý/s | Đã gửi | Đã lưu | Mất | P95 độ trễ (ms) | Bị từ chối |\n|---|---|---|---|---|---|---|---|\n| 10 | 10 | 10 | 600 | 600 | 0.00 % | 1098.0 | 0 |\n| 50 | 50 | 50 | 3000 | 3000 | 0.00 % | 928.0 | 0 |\n| 100 | 100 | 92 | 6000 | 5507 | 8.22 % | 3525.0 | 0 |\n\n**Nhận xét.** Hệ thống xử lý 100 thiết bị đồng thời (100 bản tin/s ≈ 500 thiết bị thật với chu kỳ 5 s) nhưng có mất bản tin hoặc trễ cao. Giới hạn chính là ghi CSDL (mỗi bản tin 1 giao dịch); có thể tăng bằng ghi theo lô nếu cần nhiều thiết bị hơn."
+  },
+  {
+   "title": "Số liệu thô",
+   "markdown": "Toàn bộ số liệu đo (từng mẫu độ trễ, CPU/RAM) nằm trong file JSON cùng tên. Độ lệch đồng hồ backend so với máy chạy test đo được +6.2 ms (phương pháp kiểu NTP qua `generatedAt` của API, sai số vài ms). Độ lệch < 50 ms nên không hiệu chỉnh (không đáng kể)."
+  }
+ ],
+ "raw": {
+  "P1": {
+   "dashboard_ms": [
+    15.7197265625,
+    18.957275390625,
+    13.490966796875,
+    15.943359375,
+    16.293212890625,
+    15.666015625,
+    18.08837890625,
+    21.909912109375,
+    15.91064453125,
+    15.423828125,
+    18.2421875,
+    23.362060546875,
+    17.406982421875,
+    19.71728515625,
+    12.9658203125,
+    13.556884765625,
+    16.029541015625,
+    13.22998046875,
+    18.7939453125,
+    12.86083984375,
+    14.8505859375,
+    20.10107421875,
+    23.3056640625,
+    12.83447265625,
+    20.124755859375,
+    17.713623046875,
+    15.18212890625,
+    196.33056640625,
+    20.284912109375,
+    20.34619140625,
+    14.7939453125,
+    16.90869140625,
+    17.47412109375,
+    16.0986328125,
+    13.49755859375,
+    11.283447265625,
+    25.929931640625,
+    15.05615234375,
+    16.1943359375,
+    19.144287109375,
+    16.97802734375,
+    17.8994140625,
+    15.022705078125,
+    15.025146484375,
+    15.533935546875,
+    17.071533203125,
+    17.832275390625,
+    14.4130859375,
+    16.655517578125,
+    15.899169921875,
+    16.0439453125,
+    15.82080078125,
+    16.34375,
+    14.6845703125,
+    25.2626953125,
+    10.83154296875,
+    19.82763671875,
+    21.2880859375,
+    18.418212890625,
+    24.977294921875,
+    15.357421875,
+    18.903564453125,
+    22.364501953125,
+    18.4541015625,
+    11.388427734375,
+    24.44921875,
+    14.011962890625,
+    14.1513671875,
+    14.2060546875,
+    11.114501953125,
+    10.577880859375,
+    8.70556640625,
+    9.620849609375,
+    12.0048828125,
+    11.92333984375,
+    10.46630859375,
+    11.164306640625,
+    14.3310546875,
+    15.917724609375,
+    15.7099609375,
+    16.47802734375,
+    6.09130859375,
+    14.0771484375,
+    35.5419921875,
+    15.65673828125,
+    13.149169921875,
+    19.616455078125,
+    15.136474609375,
+    12.82373046875,
+    12.7763671875,
+    13.688232421875,
+    13.168701171875,
+    15.343017578125,
+    15.552734375,
+    13.437744140625,
+    14.929931640625,
+    11.84521484375,
+    12.482666015625,
+    16.94384765625,
+    16.278076171875,
+    11.19970703125,
+    13.001953125,
+    12.855224609375,
+    13.769287109375,
+    11.40478515625,
+    10.935546875,
+    12.883544921875,
+    12.40625,
+    17.612548828125,
+    13.81396484375,
+    10.778564453125,
+    11.1259765625,
+    13.051513671875,
+    12.397705078125,
+    13.015869140625,
+    15.337890625,
+    13.531982421875,
+    11.05224609375,
+    14.44775390625,
+    14.484375,
+    14.105224609375,
+    15.4716796875,
+    12.385009765625,
+    12.227294921875,
+    12.46337890625,
+    18.93408203125,
+    9.843994140625,
+    9.94091796875,
+    9.770263671875,
+    15.58544921875,
+    15.12841796875,
+    22.57275390625,
+    13.409912109375,
+    13.708740234375,
+    10.511474609375,
+    14.3291015625,
+    31.0634765625,
+    27.934326171875,
+    25.21875,
+    14.970947265625,
+    15.181640625,
+    19.1494140625,
+    13.294677734375,
+    12.11181640625,
+    16.3203125,
+    11.9638671875,
+    14.4501953125,
+    13.4677734375,
+    15.7138671875,
+    14.087646484375,
+    28.5,
+    11.400390625,
+    18.834716796875,
+    15.66357421875,
+    15.372314453125,
+    15.104736328125,
+    9.122314453125,
+    11.361328125,
+    10.6474609375,
+    13.3896484375,
+    14.3759765625,
+    13.024658203125,
+    10.51171875,
+    14.978515625,
+    15.273193359375,
+    13.694091796875,
+    13.303466796875,
+    11.310302734375,
+    14.844482421875,
+    13.042236328125,
+    13.693359375,
+    13.23486328125,
+    10.666259765625,
+    11.758544921875,
+    14.755615234375,
+    12.564453125,
+    13.353515625,
+    10.70166015625,
+    14.933837890625,
+    15.21826171875,
+    10.325927734375,
+    8.633544921875,
+    11.084228515625,
+    8.605712890625,
+    9.83349609375,
+    11.62939453125,
+    10.218994140625,
+    14.043701171875,
+    13.85595703125,
+    12.8447265625,
+    25.9404296875,
+    14.346923828125,
+    11.647216796875,
+    11.5380859375,
+    12.566162109375,
+    16.459716796875,
+    12.737548828125,
+    11.517822265625,
+    13.5244140625,
+    10.433837890625
+   ],
+   "backend_ms": [
+    2.330078125,
+    3.483154296875,
+    2.822998046875,
+    5.01513671875,
+    5.2509765625,
+    2.823974609375,
+    5.126953125,
+    4.425048828125,
+    2.742919921875,
+    3.60986328125,
+    5.678955078125,
+    7.154052734375,
+    6.4140625,
+    6.923095703125,
+    3.760986328125,
+    3.52783203125,
+    3.006103515625,
+    2.7958984375,
+    3.299072265625,
+    3.442138671875,
+    3.474853515625,
+    4.595947265625,
+    4.742919921875,
+    4.155029296875,
+    6.125,
+    4.155029296875,
+    3.80615234375,
+    4.166015625,
+    11.1689453125,
+    4.865966796875,
+    3.890869140625,
+    7.425048828125,
+    6.422119140625,
+    6.721923828125,
+    4.212890625,
+    4.06201171875,
+    5.277099609375,
+    5.51904296875,
+    5.6650390625,
+    6.912109375,
+    6.505859375,
+    6.44482421875,
+    4.873046875,
+    4.906982421875,
+    5.351806640625,
+    6.774169921875,
+    6.984130859375,
+    5.451904296875,
+    6.048828125,
+    5.448974609375,
+    7.25,
+    7.27685546875,
+    7.156005859375,
+    5.7509765625,
+    8.324951171875,
+    4.36181640625,
+    5.609130859375,
+    7.944091796875,
+    8.15283203125,
+    8.421142578125,
+    5.951904296875,
+    4.782958984375,
+    3.10205078125,
+    4.26416015625,
+    0.994140625,
+    3.43896484375,
+    2.716064453125,
+    3.458984375,
+    3.837890625,
+    3.15185546875,
+    1.76611328125,
+    1.410888671875,
+    1.419189453125,
+    2.886962890625,
+    2.1611328125,
+    2.02099609375,
+    2.530029296875,
+    2.673095703125,
+    2.170166015625,
+    2.412109375,
+    1.841064453125,
+    1.636962890625,
+    4.439208984375,
+    2.767822265625,
+    5.25390625,
+    4.708984375,
+    4.737060546875,
+    4.4130859375,
+    4.01708984375,
+    3.384033203125,
+    4.180908203125,
+    3.2138671875,
+    4.3349609375,
+    5.073974609375,
+    4.4912109375,
+    3.630126953125,
+    3.06103515625,
+    4.10595703125,
+    6.486083984375,
+    5.142822265625,
+    2.763916015625,
+    3.177001953125,
+    4.83203125,
+    4.44580078125,
+    4.079833984375,
+    2.97607421875,
+    3.156005859375,
+    2.976806640625,
+    3.52490234375,
+    3.6298828125,
+    3.218017578125,
+    3.5068359375,
+    5.21484375,
+    2.754150390625,
+    4.44189453125,
+    5.27099609375,
+    5.29296875,
+    3.402099609375,
+    3.468017578125,
+    5.031005859375,
+    5.201904296875,
+    4.68798828125,
+    4.238037109375,
+    3.808837890625,
+    3.718994140625,
+    5.638916015625,
+    2.86083984375,
+    2.891845703125,
+    2.746826171875,
+    3.18408203125,
+    5.032958984375,
+    5.173095703125,
+    4.338134765625,
+    4.572998046875,
+    3.796142578125,
+    5.97216796875,
+    4.01416015625,
+    5.666015625,
+    4.907958984375,
+    4.420166015625,
+    6.0478515625,
+    6.72412109375,
+    4.328125,
+    4.864990234375,
+    6.178955078125,
+    4.031005859375,
+    6.135009765625,
+    6.370849609375,
+    5.23095703125,
+    7.888916015625,
+    6.1728515625,
+    5.2841796875,
+    5.81103515625,
+    6.52685546875,
+    5.55712890625,
+    5.971923828125,
+    4.24609375,
+    5.114013671875,
+    4.222900390625,
+    5.074951171875,
+    7.372802734375,
+    5.0869140625,
+    4.85400390625,
+    6.81396484375,
+    6.64599609375,
+    5.862060546875,
+    5.460205078125,
+    5.287109375,
+    7.7041015625,
+    6.954833984375,
+    5.72607421875,
+    5.76611328125,
+    5.054931640625,
+    6.192138671875,
+    6.5078125,
+    5.81494140625,
+    3.878173828125,
+    5.93603515625,
+    8.096923828125,
+    7.088134765625,
+    5.547119140625,
+    4.09619140625,
+    4.824951171875,
+    4.26708984375,
+    4.52001953125,
+    5.200927734375,
+    4.803955078125,
+    6.143798828125,
+    7.53515625,
+    7.1220703125,
+    6.93701171875,
+    5.93896484375,
+    4.501953125,
+    5.248046875,
+    5.653076171875,
+    5.90283203125,
+    5.2890625,
+    5.06591796875,
+    5.86181640625,
+    6.213134765625
+   ],
+   "sent": 200
+  },
+  "P2": {
+   "ack_ms": [
+    72,
+    52,
+    54,
+    56,
+    47,
+    55,
+    51,
+    53,
+    51,
+    54,
+    57,
+    2169,
+    66,
+    55,
+    61,
+    64,
+    54,
+    52,
+    47,
+    59,
+    54,
+    45,
+    7,
+    54,
+    55,
+    57,
+    62,
+    49,
+    54,
+    60,
+    50,
+    50,
+    52,
+    47,
+    47,
+    50,
+    53,
+    52,
+    47,
+    55,
+    56,
+    59,
+    46,
+    51,
+    55,
+    49,
+    56,
+    48,
+    47,
+    45
+   ],
+   "api_ms": [
+    150.51603317260742,
+    153.08260917663574,
+    136.03782653808594,
+    140.69294929504395,
+    143.75567436218262,
+    137.41445541381836,
+    140.9745216369629,
+    127.83122062683105,
+    138.4894847869873,
+    146.5771198272705,
+    148.37646484375,
+    2301.0425567626953,
+    146.0719108581543,
+    120.62883377075195,
+    138.09514045715332,
+    130.28502464294434,
+    140.78903198242188,
+    120.23138999938965,
+    143.1601047515869,
+    139.43910598754883,
+    135.81061363220215,
+    136.2464427947998,
+    134.95182991027832,
+    144.85788345336914,
+    137.78233528137207,
+    147.324800491333,
+    137.04299926757812,
+    148.8666534423828,
+    140.1669979095459,
+    139.15300369262695,
+    139.41502571105957,
+    139.27245140075684,
+    146.48818969726562,
+    133.21423530578613,
+    139.9390697479248,
+    145.03073692321777,
+    140.01750946044922,
+    149.2471694946289,
+    135.70261001586914,
+    150.10881423950195,
+    154.79493141174316,
+    128.8015842437744,
+    123.27337265014648,
+    141.3869857788086,
+    141.7980194091797,
+    121.69384956359863,
+    129.349946975708,
+    140.3043270111084,
+    139.34636116027832,
+    121.28925323486328
+   ],
+   "status": {
+    "SUCCESS": 50
+   }
+  },
+  "P3_qos1": {
+   "sent": 1000,
+   "stored": 1000,
+   "loss_pct": 0.0
+  },
+  "P3_qos0": {
+   "sent": 1000,
+   "stored": 1000,
+   "loss_pct": 0.0
+  },
+  "P4_broker": {
+   "restart_s": 3.968487501144409,
+   "sent": 24,
+   "stored": 24
+  },
+  "P4_backend": {
+   "restart_s": 16.20514225959778,
+   "sent": 50,
+   "stored": 50
+  },
+  "P4": {
+   "offline_detect_s": 1.0227041244506836,
+   "online_s": 0.06482982635498047,
+   "buffered_stored": 20
+  },
+  "P5": {
+   "unique": 200,
+   "sent": 400,
+   "stored": 200,
+   "duplicates_ignored": 400
+  },
+  "P7": {
+   "rows": [
+    [
+     1,
+     300,
+     300,
+     "0.00 %",
+     3964.0,
+     0,
+     "358"
+    ],
+    [
+     2,
+     300,
+     300,
+     "0.00 %",
+     475.0,
+     0,
+     "360"
+    ],
+    [
+     3,
+     300,
+     300,
+     "0.00 %",
+     100.0,
+     0,
+     "362"
+    ],
+    [
+     4,
+     300,
+     300,
+     "0.00 %",
+     117.0,
+     0,
+     "365"
+    ],
+    [
+     5,
+     300,
+     300,
+     "0.00 %",
+     153.0,
+     0,
+     "366"
+    ],
+    [
+     6,
+     300,
+     300,
+     "0.00 %",
+     184.0,
+     0,
+     "367"
+    ],
+    [
+     7,
+     300,
+     300,
+     "0.00 %",
+     184.0,
+     0,
+     "367"
+    ],
+    [
+     8,
+     300,
+     300,
+     "0.00 %",
+     163.0,
+     0,
+     "368"
+    ],
+    [
+     9,
+     300,
+     300,
+     "0.00 %",
+     133.0,
+     0,
+     "368"
+    ],
+    [
+     10,
+     300,
+     300,
+     "0.00 %",
+     94.0,
+     0,
+     "370"
+    ]
+   ],
+   "resources": {
+    "iot-backend": {
+     "cpu_avg": 15.7,
+     "cpu_max": 154.4,
+     "mem_avg": 364.5,
+     "mem_max": 370.4
+    },
+    "iot-mosquitto": {
+     "cpu_avg": 0.4,
+     "cpu_max": 6.4,
+     "mem_avg": 1.7,
+     "mem_max": 2.0
+    },
+    "iot-postgres": {
+     "cpu_avg": 4.6,
+     "cpu_max": 58.2,
+     "mem_avg": 63.5,
+     "mem_max": 70.1
+    },
+    "iot-frontend": {
+     "cpu_avg": 0.6,
+     "cpu_max": 26.4,
+     "mem_avg": 14.8,
+     "mem_max": 15.4
+    }
+   }
+  },
+  "P8_10": {
+   "sent": 600,
+   "stored": 600,
+   "throughput": 10.192073082604757,
+   "p95": 1098.0,
+   "resources": {
+    "iot-backend": {
+     "cpu_avg": 37.6,
+     "cpu_max": 246.7,
+     "mem_avg": 370.7,
+     "mem_max": 371.5
+    },
+    "iot-mosquitto": {
+     "cpu_avg": 0.9,
+     "cpu_max": 2.7,
+     "mem_avg": 1.8,
+     "mem_max": 1.8
+    },
+    "iot-postgres": {
+     "cpu_avg": 12.0,
+     "cpu_max": 56.9,
+     "mem_avg": 67.4,
+     "mem_max": 68.4
+    },
+    "iot-frontend": {
+     "cpu_avg": 0.6,
+     "cpu_max": 5.6,
+     "mem_avg": 14.9,
+     "mem_max": 15.5
+    }
+   }
+  },
+  "P8_50": {
+   "sent": 3000,
+   "stored": 3000,
+   "throughput": 50.17795384333785,
+   "p95": 928.0,
+   "resources": {
+    "iot-backend": {
+     "cpu_avg": 49.4,
+     "cpu_max": 182.8,
+     "mem_avg": 371.2,
+     "mem_max": 373.2
+    },
+    "iot-mosquitto": {
+     "cpu_avg": 2.8,
+     "cpu_max": 3.8,
+     "mem_avg": 2.3,
+     "mem_max": 2.5
+    },
+    "iot-postgres": {
+     "cpu_avg": 22.5,
+     "cpu_max": 49.0,
+     "mem_avg": 70.7,
+     "mem_max": 71.7
+    },
+    "iot-frontend": {
+     "cpu_avg": 1.5,
+     "cpu_max": 15.1,
+     "mem_avg": 14.8,
+     "mem_max": 15.3
+    }
+   }
+  },
+  "P8_100": {
+   "sent": 6000,
+   "stored": 5507,
+   "throughput": 91.91312603921567,
+   "p95": 3525.0,
+   "resources": {
+    "iot-backend": {
+     "cpu_avg": 67.4,
+     "cpu_max": 160.2,
+     "mem_avg": 374.1,
+     "mem_max": 374.6
+    },
+    "iot-mosquitto": {
+     "cpu_avg": 3.7,
+     "cpu_max": 8.1,
+     "mem_avg": 3.2,
+     "mem_max": 3.5
+    },
+    "iot-postgres": {
+     "cpu_avg": 37.2,
+     "cpu_max": 105.8,
+     "mem_avg": 74.3,
+     "mem_max": 81.7
+    },
+    "iot-frontend": {
+     "cpu_avg": 1.5,
+     "cpu_max": 4.4,
+     "mem_avg": 14.8,
+     "mem_max": 15.3
+    }
+   }
+  }
+ },
+ "resources": [
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.83,
+    "mem": 353.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.13,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 6.06,
+    "mem": 60.88
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.73
+   },
+   "_t": 1794118917.0310419
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 10.67,
+    "mem": 353.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 1.18,
+    "mem": 60.62
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.73
+   },
+   "_t": 1794118920.150339
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 14.63,
+    "mem": 354.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 1.53,
+    "mem": 60.25
+   },
+   "iot-frontend": {
+    "cpu": 0.05,
+    "mem": 14.82
+   },
+   "_t": 1794118923.2840168
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.58,
+    "mem": 354.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.28,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 4.79,
+    "mem": 60.7
+   },
+   "iot-frontend": {
+    "cpu": 2.9,
+    "mem": 14.75
+   },
+   "_t": 1794118926.5225472
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.04,
+    "mem": 354.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 1.26,
+    "mem": 60.7
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.74
+   },
+   "_t": 1794118929.7248788
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.26,
+    "mem": 355.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.21,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 2.03,
+    "mem": 60.72
+   },
+   "iot-frontend": {
+    "cpu": 1.83,
+    "mem": 14.73
+   },
+   "_t": 1794118932.879354
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 16.41,
+    "mem": 355.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 2.38,
+    "mem": 60.48
+   },
+   "iot-frontend": {
+    "cpu": 3.61,
+    "mem": 15.05
+   },
+   "_t": 1794118936.0933483
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 13.52,
+    "mem": 356.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 2.13,
+    "mem": 60.86
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.9
+   },
+   "_t": 1794118939.247777
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.28,
+    "mem": 356.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.14,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 0.94,
+    "mem": 60.71
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.92
+   },
+   "_t": 1794118942.3625665
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.24,
+    "mem": 356.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.45,
+    "mem": 60.55
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.78
+   },
+   "_t": 1794118945.4853108
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.09,
+    "mem": 356.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 0.99,
+    "mem": 60.84
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.89
+   },
+   "_t": 1794118948.6048203
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.35,
+    "mem": 356.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.17,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 4.31,
+    "mem": 60.98
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.82
+   },
+   "_t": 1794118951.7220244
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 9.01,
+    "mem": 356.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.12,
+    "mem": 60.62
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.71
+   },
+   "_t": 1794118954.830613
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.36,
+    "mem": 356.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.14,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.28,
+    "mem": 60.87
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.96
+   },
+   "_t": 1794118957.9419281
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 42.19,
+    "mem": 357.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.32,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.07,
+    "mem": 60.8
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.84
+   },
+   "_t": 1794118961.048488
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.95,
+    "mem": 357.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.19,
+    "mem": 60.77
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.72
+   },
+   "_t": 1794118964.160583
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.85,
+    "mem": 357.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.12,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 3.9,
+    "mem": 60.84
+   },
+   "iot-frontend": {
+    "cpu": 3.08,
+    "mem": 14.99
+   },
+   "_t": 1794118967.301625
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.95,
+    "mem": 357.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.91,
+    "mem": 60.67
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.96
+   },
+   "_t": 1794118970.432005
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.97,
+    "mem": 358.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.09,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 0.96,
+    "mem": 60.61
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.75
+   },
+   "_t": 1794118973.6763551
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 18.48,
+    "mem": 357.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.07,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 4.44,
+    "mem": 61.16
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.75
+   },
+   "_t": 1794118976.782887
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 25.48,
+    "mem": 358.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.42,
+    "mem": 61.14
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.83
+   },
+   "_t": 1794118979.917672
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.47,
+    "mem": 358.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.2,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.96,
+    "mem": 61.27
+   },
+   "iot-frontend": {
+    "cpu": 0.16,
+    "mem": 14.71
+   },
+   "_t": 1794118983.2415442
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.56,
+    "mem": 358.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.66,
+    "mem": 60.97
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.71
+   },
+   "_t": 1794118986.3859582
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 10.08,
+    "mem": 358.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.1,
+    "mem": 1.734
+   },
+   "iot-postgres": {
+    "cpu": 1.15,
+    "mem": 60.91
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.98
+   },
+   "_t": 1794118989.5409937
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.65,
+    "mem": 357.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.13,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.18,
+    "mem": 61.27
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.74
+   },
+   "_t": 1794118992.7133353
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 26.67,
+    "mem": 357.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.28,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.5,
+    "mem": 61.25
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.74
+   },
+   "_t": 1794118995.8203993
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.6,
+    "mem": 357.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.11,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.41,
+    "mem": 61.27
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.87
+   },
+   "_t": 1794118998.9244678
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.68,
+    "mem": 357.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.35,
+    "mem": 1.809
+   },
+   "iot-postgres": {
+    "cpu": 1.91,
+    "mem": 65.95
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.84
+   },
+   "_t": 1794119002.0617952
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.56,
+    "mem": 357.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.62,
+    "mem": 1.766
+   },
+   "iot-postgres": {
+    "cpu": 9.89,
+    "mem": 61.37
+   },
+   "iot-frontend": {
+    "cpu": 1.49,
+    "mem": 14.79
+   },
+   "_t": 1794119005.1789653
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 9.32,
+    "mem": 358.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.36,
+    "mem": 1.746
+   },
+   "iot-postgres": {
+    "cpu": 11.59,
+    "mem": 61.59
+   },
+   "iot-frontend": {
+    "cpu": 2.43,
+    "mem": 14.97
+   },
+   "_t": 1794119008.3831913
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 31.67,
+    "mem": 358.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.74,
+    "mem": 1.961
+   },
+   "iot-postgres": {
+    "cpu": 3.62,
+    "mem": 61.7
+   },
+   "iot-frontend": {
+    "cpu": 2.74,
+    "mem": 14.79
+   },
+   "_t": 1794119011.766865
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 15.25,
+    "mem": 359.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.51,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.56,
+    "mem": 61.62
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.86
+   },
+   "_t": 1794119014.9599092
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.72,
+    "mem": 358.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.2,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 7.96,
+    "mem": 61.76
+   },
+   "iot-frontend": {
+    "cpu": 7.65,
+    "mem": 15.12
+   },
+   "_t": 1794119018.1336222
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 102.73,
+    "mem": 359.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.21,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 5.91,
+    "mem": 61.56
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.83
+   },
+   "_t": 1794119021.380569
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.21,
+    "mem": 359.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.4,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 3.67,
+    "mem": 61.46
+   },
+   "iot-frontend": {
+    "cpu": 0.18,
+    "mem": 14.74
+   },
+   "_t": 1794119024.6177855
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 86.27,
+    "mem": 362.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.36,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 14.6,
+    "mem": 61.95
+   },
+   "iot-frontend": {
+    "cpu": 0.17,
+    "mem": 14.9
+   },
+   "_t": 1794119028.1470966
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 20.92,
+    "mem": 359.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.42,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 5.3,
+    "mem": 61.76
+   },
+   "iot-frontend": {
+    "cpu": 0.24,
+    "mem": 14.8
+   },
+   "_t": 1794119031.464636
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 45.87,
+    "mem": 360.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.29,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 3.71,
+    "mem": 61.65
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 14.86
+   },
+   "_t": 1794119034.7101746
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.96,
+    "mem": 360.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.06,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 0.02,
+    "mem": 61.54
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.86
+   },
+   "_t": 1794119037.8322787
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 26.55,
+    "mem": 360.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.29,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 3.42,
+    "mem": 62.05
+   },
+   "iot-frontend": {
+    "cpu": 0.2,
+    "mem": 14.9
+   },
+   "_t": 1794119041.0668905
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 23.07,
+    "mem": 360.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.56,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 30.15,
+    "mem": 61.98
+   },
+   "iot-frontend": {
+    "cpu": 0.18,
+    "mem": 14.77
+   },
+   "_t": 1794119044.4666064
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.49,
+    "mem": 360.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.21,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.43,
+    "mem": 61.55
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.86
+   },
+   "_t": 1794119047.9535074
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 32.19,
+    "mem": 363.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.33,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.98,
+    "mem": 62.12
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.89
+   },
+   "_t": 1794119051.1375332
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.28,
+    "mem": 361.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.3,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 2.13,
+    "mem": 62.08
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.74
+   },
+   "_t": 1794119054.3214436
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 78.87,
+    "mem": 361.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.24,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 3.37,
+    "mem": 61.52
+   },
+   "iot-frontend": {
+    "cpu": 3.44,
+    "mem": 15.45
+   },
+   "_t": 1794119057.489215
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 55.7,
+    "mem": 361.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.42,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.54,
+    "mem": 61.94
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.95
+   },
+   "_t": 1794119060.6489851
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.23,
+    "mem": 362.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.23,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.17,
+    "mem": 62.9
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.86
+   },
+   "_t": 1794119063.8412845
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.61,
+    "mem": 362.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.49,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.09,
+    "mem": 61.91
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.86
+   },
+   "_t": 1794119067.0065296
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.05,
+    "mem": 362.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.63,
+    "mem": 61.95
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.86
+   },
+   "_t": 1794119070.1559954
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.3,
+    "mem": 362.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.51,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.09,
+    "mem": 61.78
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.77
+   },
+   "_t": 1794119073.3519745
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 14.86,
+    "mem": 362.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.31,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.69,
+    "mem": 61.73
+   },
+   "iot-frontend": {
+    "cpu": 3.1,
+    "mem": 14.86
+   },
+   "_t": 1794119076.527364
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 9.58,
+    "mem": 362.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.3,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.2,
+    "mem": 62.24
+   },
+   "iot-frontend": {
+    "cpu": 0.22,
+    "mem": 14.89
+   },
+   "_t": 1794119079.724774
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 12.4,
+    "mem": 361.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.28,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.51,
+    "mem": 62.12
+   },
+   "iot-frontend": {
+    "cpu": 0.38,
+    "mem": 14.85
+   },
+   "_t": 1794119082.8844924
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.45,
+    "mem": 362.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.43,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.06,
+    "mem": 61.89
+   },
+   "iot-frontend": {
+    "cpu": 0.2,
+    "mem": 14.75
+   },
+   "_t": 1794119086.074208
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 37.35,
+    "mem": 362.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.3,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.86,
+    "mem": 61.97
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.75
+   },
+   "_t": 1794119089.2655907
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.44,
+    "mem": 362.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.31,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.08,
+    "mem": 61.89
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.83
+   },
+   "_t": 1794119092.4164102
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 9.13,
+    "mem": 362.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.6,
+    "mem": 62.07
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.71
+   },
+   "_t": 1794119095.5587945
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.28,
+    "mem": 361.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.37,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.83,
+    "mem": 61.97
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 14.71
+   },
+   "_t": 1794119098.6781723
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 1.13,
+    "mem": 361.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.49,
+    "mem": 62.13
+   },
+   "iot-frontend": {
+    "cpu": 0.04,
+    "mem": 14.73
+   },
+   "_t": 1794119101.8250215
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 104.76,
+    "mem": 362.2
+   },
+   "iot-mosquitto": {
+    "cpu": 1.13,
+    "mem": 1.715
+   },
+   "iot-postgres": {
+    "cpu": 40.42,
+    "mem": 62.33
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.83
+   },
+   "_t": 1794119105.1398091
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 119.98,
+    "mem": 365.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.79,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 9.6,
+    "mem": 62.07
+   },
+   "iot-frontend": {
+    "cpu": 0.33,
+    "mem": 14.71
+   },
+   "_t": 1794119108.5332835
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 36.54,
+    "mem": 366.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.34,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.1,
+    "mem": 62.27
+   },
+   "iot-frontend": {
+    "cpu": 0.25,
+    "mem": 14.74
+   },
+   "_t": 1794119111.748787
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 28.35,
+    "mem": 362.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.4,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.52,
+    "mem": 62.09
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.86
+   },
+   "_t": 1794119114.9933786
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 18.71,
+    "mem": 362.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.91,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.94,
+    "mem": 62.1
+   },
+   "iot-frontend": {
+    "cpu": 0.36,
+    "mem": 14.74
+   },
+   "_t": 1794119118.2172513
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 25.9,
+    "mem": 362.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.31,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.25,
+    "mem": 62.2
+   },
+   "iot-frontend": {
+    "cpu": 0.18,
+    "mem": 14.78
+   },
+   "_t": 1794119121.4121127
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.92,
+    "mem": 362.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.37,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.21,
+    "mem": 62.06
+   },
+   "iot-frontend": {
+    "cpu": 0.38,
+    "mem": 14.83
+   },
+   "_t": 1794119124.679584
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.61,
+    "mem": 363.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.37,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.85,
+    "mem": 61.91
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.71
+   },
+   "_t": 1794119127.807656
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.15,
+    "mem": 362.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.02,
+    "mem": 62.39
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 15.02
+   },
+   "_t": 1794119130.9999573
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.5,
+    "mem": 362.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.28,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.75,
+    "mem": 62.54
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.73
+   },
+   "_t": 1794119134.159494
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.92,
+    "mem": 362.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.04,
+    "mem": 61.88
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.71
+   },
+   "_t": 1794119137.3093433
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.42,
+    "mem": 362.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.54,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.28,
+    "mem": 65.94
+   },
+   "iot-frontend": {
+    "cpu": 2.67,
+    "mem": 15.07
+   },
+   "_t": 1794119140.435629
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.65,
+    "mem": 362.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.64,
+    "mem": 62.09
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.75
+   },
+   "_t": 1794119143.62598
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 15.65,
+    "mem": 365.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.41,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 9.58,
+    "mem": 61.94
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.7
+   },
+   "_t": 1794119146.806822
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.61,
+    "mem": 364.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.23,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.13,
+    "mem": 62.12
+   },
+   "iot-frontend": {
+    "cpu": 8.79,
+    "mem": 15.02
+   },
+   "_t": 1794119150.0296447
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.0,
+    "mem": 365.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.18,
+    "mem": 62.32
+   },
+   "iot-frontend": {
+    "cpu": 0.19,
+    "mem": 14.73
+   },
+   "_t": 1794119153.1887383
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.14,
+    "mem": 365.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.28,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.52,
+    "mem": 62.02
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.82
+   },
+   "_t": 1794119156.3254642
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.52,
+    "mem": 365.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.42,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.14,
+    "mem": 62.15
+   },
+   "iot-frontend": {
+    "cpu": 2.93,
+    "mem": 15.26
+   },
+   "_t": 1794119159.4581976
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 60.43,
+    "mem": 365.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.03,
+    "mem": 62.1
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.82
+   },
+   "_t": 1794119162.6076674
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 34.61,
+    "mem": 365.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.46,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.05,
+    "mem": 62.28
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.82
+   },
+   "_t": 1794119165.7821782
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 154.45,
+    "mem": 365.7
+   },
+   "iot-mosquitto": {
+    "cpu": 6.42,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 32.83,
+    "mem": 62.48
+   },
+   "iot-frontend": {
+    "cpu": 0.29,
+    "mem": 14.7
+   },
+   "_t": 1794119169.3512452
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.27,
+    "mem": 365.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.37,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.02,
+    "mem": 63.06
+   },
+   "iot-frontend": {
+    "cpu": 0.17,
+    "mem": 14.9
+   },
+   "_t": 1794119172.5470061
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.43,
+    "mem": 366.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.28,
+    "mem": 62.97
+   },
+   "iot-frontend": {
+    "cpu": 0.24,
+    "mem": 14.9
+   },
+   "_t": 1794119175.7410645
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.77,
+    "mem": 366.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.52,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 8.47,
+    "mem": 62.58
+   },
+   "iot-frontend": {
+    "cpu": 0.22,
+    "mem": 14.78
+   },
+   "_t": 1794119178.9497898
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 35.89,
+    "mem": 366.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.3,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 18.9,
+    "mem": 63.12
+   },
+   "iot-frontend": {
+    "cpu": 0.19,
+    "mem": 14.92
+   },
+   "_t": 1794119182.4581316
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 36.14,
+    "mem": 366.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.73,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 11.09,
+    "mem": 63.04
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.96
+   },
+   "_t": 1794119185.7309258
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 14.04,
+    "mem": 366.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.31,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.3,
+    "mem": 62.92
+   },
+   "iot-frontend": {
+    "cpu": 0.22,
+    "mem": 14.74
+   },
+   "_t": 1794119189.009011
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.21,
+    "mem": 366.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.33,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.9,
+    "mem": 63.15
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 15.23
+   },
+   "_t": 1794119192.216904
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.74,
+    "mem": 366.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.5,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.17,
+    "mem": 62.89
+   },
+   "iot-frontend": {
+    "cpu": 0.15,
+    "mem": 14.88
+   },
+   "_t": 1794119195.3497565
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.49,
+    "mem": 366.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.35,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.74,
+    "mem": 63.04
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.74
+   },
+   "_t": 1794119198.5073483
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.0,
+    "mem": 366.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.65,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.22,
+    "mem": 62.63
+   },
+   "iot-frontend": {
+    "cpu": 0.18,
+    "mem": 15.12
+   },
+   "_t": 1794119201.6623316
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.81,
+    "mem": 366.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.38,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.15,
+    "mem": 62.64
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.93
+   },
+   "_t": 1794119204.7837408
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.54,
+    "mem": 365.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.46,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.92,
+    "mem": 62.45
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.74
+   },
+   "_t": 1794119207.9205048
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.68,
+    "mem": 364.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.05,
+    "mem": 62.62
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 15.05
+   },
+   "_t": 1794119211.0409105
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.18,
+    "mem": 365.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.39,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.68,
+    "mem": 62.78
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.86
+   },
+   "_t": 1794119214.184554
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 9.03,
+    "mem": 364.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.54,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.27,
+    "mem": 62.84
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.74
+   },
+   "_t": 1794119217.3762274
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.79,
+    "mem": 364.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.21,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.64,
+    "mem": 62.72
+   },
+   "iot-frontend": {
+    "cpu": 2.86,
+    "mem": 15.18
+   },
+   "_t": 1794119220.4910672
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.71,
+    "mem": 365.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.97,
+    "mem": 62.89
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.76
+   },
+   "_t": 1794119223.6386092
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.24,
+    "mem": 366.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.36,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.26,
+    "mem": 62.5
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.77
+   },
+   "_t": 1794119226.7586844
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.13,
+    "mem": 365.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.52,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.05,
+    "mem": 62.79
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.77
+   },
+   "_t": 1794119229.9216585
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.64,
+    "mem": 365.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.23,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.35,
+    "mem": 63.14
+   },
+   "iot-frontend": {
+    "cpu": 0.15,
+    "mem": 14.76
+   },
+   "_t": 1794119233.0758157
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.51,
+    "mem": 365.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.51,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.72,
+    "mem": 62.91
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.83
+   },
+   "_t": 1794119236.2694383
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 10.89,
+    "mem": 365.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.53,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.68,
+    "mem": 63.23
+   },
+   "iot-frontend": {
+    "cpu": 0.2,
+    "mem": 14.71
+   },
+   "_t": 1794119239.4921508
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.44,
+    "mem": 365.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.39,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.85,
+    "mem": 62.89
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.94
+   },
+   "_t": 1794119242.6855826
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 10.08,
+    "mem": 365.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.33,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.05,
+    "mem": 63.07
+   },
+   "iot-frontend": {
+    "cpu": 0.21,
+    "mem": 14.91
+   },
+   "_t": 1794119245.917466
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.04,
+    "mem": 364.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.35,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.69,
+    "mem": 63.06
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.71
+   },
+   "_t": 1794119249.1044068
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.34,
+    "mem": 364.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.37,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.85,
+    "mem": 63.05
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 15.17
+   },
+   "_t": 1794119252.263858
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.69,
+    "mem": 364.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.51,
+    "mem": 62.85
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.77
+   },
+   "_t": 1794119255.4689746
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 31.92,
+    "mem": 365.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.61,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 47.81,
+    "mem": 70.09
+   },
+   "iot-frontend": {
+    "cpu": 0.21,
+    "mem": 14.98
+   },
+   "_t": 1794119258.7232053
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 20.9,
+    "mem": 365.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.38,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 6.25,
+    "mem": 64.79
+   },
+   "iot-frontend": {
+    "cpu": 1.84,
+    "mem": 14.75
+   },
+   "_t": 1794119262.0503948
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 64.18,
+    "mem": 365.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.49,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 9.46,
+    "mem": 64.65
+   },
+   "iot-frontend": {
+    "cpu": 0.84,
+    "mem": 14.71
+   },
+   "_t": 1794119265.653686
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 22.17,
+    "mem": 367.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.97,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 58.18,
+    "mem": 64.92
+   },
+   "iot-frontend": {
+    "cpu": 0.38,
+    "mem": 14.71
+   },
+   "_t": 1794119270.2569304
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 94.12,
+    "mem": 366.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.66,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 28.87,
+    "mem": 64.86
+   },
+   "iot-frontend": {
+    "cpu": 0.15,
+    "mem": 14.91
+   },
+   "_t": 1794119275.0073533
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 73.25,
+    "mem": 367.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.7,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.1,
+    "mem": 64.47
+   },
+   "iot-frontend": {
+    "cpu": 0.21,
+    "mem": 14.8
+   },
+   "_t": 1794119278.4432535
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 14.44,
+    "mem": 367.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.49,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.7,
+    "mem": 64.84
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.72
+   },
+   "_t": 1794119281.7025404
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 65.83,
+    "mem": 367.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.23,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 10.03,
+    "mem": 65.45
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 15.0
+   },
+   "_t": 1794119284.9418979
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.73,
+    "mem": 367.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.15,
+    "mem": 64.96
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.88
+   },
+   "_t": 1794119288.1255739
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 133.79,
+    "mem": 367.7
+   },
+   "iot-mosquitto": {
+    "cpu": 1.9,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 17.39,
+    "mem": 64.51
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.74
+   },
+   "_t": 1794119291.3418899
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.59,
+    "mem": 367.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.24,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 2.36,
+    "mem": 64.68
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 15.22
+   },
+   "_t": 1794119294.5386128
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.15,
+    "mem": 367.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.34,
+    "mem": 65.14
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.85
+   },
+   "_t": 1794119297.7159407
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.28,
+    "mem": 367.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.24,
+    "mem": 64.8
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.74
+   },
+   "_t": 1794119300.8912644
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.86,
+    "mem": 367.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.35,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.46,
+    "mem": 64.8
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 15.11
+   },
+   "_t": 1794119304.0929592
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.61,
+    "mem": 367.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.86,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 2.4,
+    "mem": 64.94
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.74
+   },
+   "_t": 1794119307.2880013
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.48,
+    "mem": 368.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.66,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 8.85,
+    "mem": 65.04
+   },
+   "iot-frontend": {
+    "cpu": 0.25,
+    "mem": 14.74
+   },
+   "_t": 1794119310.5426135
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 15.16,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.88,
+    "mem": 64.75
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 15.09
+   },
+   "_t": 1794119313.7377872
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.27,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.54,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 4.07,
+    "mem": 65.2
+   },
+   "iot-frontend": {
+    "cpu": 0.27,
+    "mem": 14.75
+   },
+   "_t": 1794119316.900637
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.64,
+    "mem": 368.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.73,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 4.43,
+    "mem": 64.98
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.75
+   },
+   "_t": 1794119320.1012752
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 12.03,
+    "mem": 367.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.39,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 3.48,
+    "mem": 64.82
+   },
+   "iot-frontend": {
+    "cpu": 0.19,
+    "mem": 15.06
+   },
+   "_t": 1794119323.3927572
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.9,
+    "mem": 366.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.85,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 5.62,
+    "mem": 64.7
+   },
+   "iot-frontend": {
+    "cpu": 0.3,
+    "mem": 14.86
+   },
+   "_t": 1794119326.7050936
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 41.68,
+    "mem": 366.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.4,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 3.8,
+    "mem": 64.71
+   },
+   "iot-frontend": {
+    "cpu": 0.18,
+    "mem": 14.74
+   },
+   "_t": 1794119330.0880122
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.4,
+    "mem": 366.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.41,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 6.68,
+    "mem": 64.83
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 15.06
+   },
+   "_t": 1794119333.3499746
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.6,
+    "mem": 366.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.14,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.53,
+    "mem": 65.15
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 14.92
+   },
+   "_t": 1794119336.4724283
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 19.57,
+    "mem": 366.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.33,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.72,
+    "mem": 64.93
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.75
+   },
+   "_t": 1794119339.6130679
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.59,
+    "mem": 366.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.7,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.16,
+    "mem": 64.86
+   },
+   "iot-frontend": {
+    "cpu": 26.43,
+    "mem": 15.24
+   },
+   "_t": 1794119342.9100788
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.18,
+    "mem": 366.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.97,
+    "mem": 65.12
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.9
+   },
+   "_t": 1794119346.1195471
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 15.82,
+    "mem": 367.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.49,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.58,
+    "mem": 64.73
+   },
+   "iot-frontend": {
+    "cpu": 0.26,
+    "mem": 14.75
+   },
+   "_t": 1794119349.620711
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 0.89,
+    "mem": 367.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.15,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.31,
+    "mem": 64.72
+   },
+   "iot-frontend": {
+    "cpu": 2.56,
+    "mem": 14.75
+   },
+   "_t": 1794119352.7271566
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.95,
+    "mem": 367.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.29,
+    "mem": 64.81
+   },
+   "iot-frontend": {
+    "cpu": 1.13,
+    "mem": 14.84
+   },
+   "_t": 1794119355.8257291
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.05,
+    "mem": 367.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.45,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.97,
+    "mem": 65.08
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.84
+   },
+   "_t": 1794119358.9233456
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.57,
+    "mem": 367.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.25,
+    "mem": 64.7
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.72
+   },
+   "_t": 1794119362.010692
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.14,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.14,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.97,
+    "mem": 65.13
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.74
+   },
+   "_t": 1794119365.1258175
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 8.93,
+    "mem": 367.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.32,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.58,
+    "mem": 65.05
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.83
+   },
+   "_t": 1794119368.2279859
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.05,
+    "mem": 368.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.22,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.97,
+    "mem": 64.98
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.71
+   },
+   "_t": 1794119371.359891
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.57,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.22,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.61,
+    "mem": 65.34
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.78
+   },
+   "_t": 1794119374.4826412
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.42,
+    "mem": 367.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.2,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.61,
+    "mem": 65.6
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.74
+   },
+   "_t": 1794119377.5818226
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.69,
+    "mem": 368.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.43,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.81,
+    "mem": 65.25
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.71
+   },
+   "_t": 1794119380.6925554
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.8,
+    "mem": 367.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.34,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.88,
+    "mem": 65.34
+   },
+   "iot-frontend": {
+    "cpu": 2.56,
+    "mem": 14.76
+   },
+   "_t": 1794119383.7838807
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 27.22,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.67,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 21.0,
+    "mem": 65.39
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.76
+   },
+   "_t": 1794119387.3150713
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 14.64,
+    "mem": 368.1
+   },
+   "iot-mosquitto": {
+    "cpu": 1.02,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.8,
+    "mem": 65.23
+   },
+   "iot-frontend": {
+    "cpu": 0.21,
+    "mem": 14.73
+   },
+   "_t": 1794119391.0536675
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.87,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.12,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 6.14,
+    "mem": 65.48
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.89
+   },
+   "_t": 1794119394.195942
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.08,
+    "mem": 368.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.47,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.48,
+    "mem": 65.14
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.83
+   },
+   "_t": 1794119397.3349538
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 44.92,
+    "mem": 368.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.18,
+    "mem": 65.59
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.71
+   },
+   "_t": 1794119400.5831802
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 28.17,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.38,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.1,
+    "mem": 65.17
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.84
+   },
+   "_t": 1794119403.9457078
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.88,
+    "mem": 368.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.15,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.39,
+    "mem": 65.18
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.83
+   },
+   "_t": 1794119407.085108
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 21.7,
+    "mem": 368.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.79,
+    "mem": 64.94
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.82
+   },
+   "_t": 1794119410.44219
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 0.75,
+    "mem": 368.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.22,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.1,
+    "mem": 65.36
+   },
+   "iot-frontend": {
+    "cpu": 8.02,
+    "mem": 15.23
+   },
+   "_t": 1794119413.6635606
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 46.91,
+    "mem": 368.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.48,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 13.01,
+    "mem": 65.22
+   },
+   "iot-frontend": {
+    "cpu": 0.03,
+    "mem": 14.84
+   },
+   "_t": 1794119416.9493003
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 20.69,
+    "mem": 368.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.45,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.54,
+    "mem": 65.15
+   },
+   "iot-frontend": {
+    "cpu": 0.23,
+    "mem": 14.83
+   },
+   "_t": 1794119420.7025967
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.63,
+    "mem": 368.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.33,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.74,
+    "mem": 65.16
+   },
+   "iot-frontend": {
+    "cpu": 3.71,
+    "mem": 15.3
+   },
+   "_t": 1794119423.8436763
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 1.94,
+    "mem": 368.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.24,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.14,
+    "mem": 65.45
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.86
+   },
+   "_t": 1794119426.9716516
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.43,
+    "mem": 368.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.23,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.07,
+    "mem": 65.59
+   },
+   "iot-frontend": {
+    "cpu": 0.21,
+    "mem": 14.74
+   },
+   "_t": 1794119430.1176214
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.08,
+    "mem": 368.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.18,
+    "mem": 65.07
+   },
+   "iot-frontend": {
+    "cpu": 2.73,
+    "mem": 14.97
+   },
+   "_t": 1794119433.236679
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.99,
+    "mem": 368.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.33,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.55,
+    "mem": 65.26
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.74
+   },
+   "_t": 1794119436.317233
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 1.72,
+    "mem": 368.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 8.12,
+    "mem": 65.72
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.83
+   },
+   "_t": 1794119439.4150622
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.76,
+    "mem": 368.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.21,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.24,
+    "mem": 65.15
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.71
+   },
+   "_t": 1794119442.5344985
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.38,
+    "mem": 368.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.03,
+    "mem": 65.09
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.8
+   },
+   "_t": 1794119445.641859
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.29,
+    "mem": 368.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.17,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.87,
+    "mem": 65.19
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.77
+   },
+   "_t": 1794119448.7445302
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.23,
+    "mem": 368.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.17,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.99,
+    "mem": 65.19
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.72
+   },
+   "_t": 1794119451.8638089
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.55,
+    "mem": 368.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.12,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.57,
+    "mem": 65.54
+   },
+   "iot-frontend": {
+    "cpu": 0.05,
+    "mem": 14.88
+   },
+   "_t": 1794119454.9775991
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.66,
+    "mem": 368.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.46,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.35,
+    "mem": 65.34
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.82
+   },
+   "_t": 1794119458.086874
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 11.32,
+    "mem": 368.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.79,
+    "mem": 65.07
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.8
+   },
+   "_t": 1794119461.2689524
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.33,
+    "mem": 368.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.48,
+    "mem": 65.38
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 15.14
+   },
+   "_t": 1794119464.3830605
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.1,
+    "mem": 368.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.17,
+    "mem": 65.27
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.75
+   },
+   "_t": 1794119467.483405
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 7.75,
+    "mem": 368.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.46,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.14,
+    "mem": 65.02
+   },
+   "iot-frontend": {
+    "cpu": 0.05,
+    "mem": 14.73
+   },
+   "_t": 1794119470.577109
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.86,
+    "mem": 368.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.15,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.41,
+    "mem": 65.01
+   },
+   "iot-frontend": {
+    "cpu": 0.15,
+    "mem": 14.73
+   },
+   "_t": 1794119473.7371
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 0.76,
+    "mem": 367.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.08,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.7,
+    "mem": 65.41
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.79
+   },
+   "_t": 1794119476.8262625
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.66,
+    "mem": 367.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 6.21,
+    "mem": 65.63
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.74
+   },
+   "_t": 1794119479.9510958
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 5.42,
+    "mem": 368.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.45,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.36,
+    "mem": 65.03
+   },
+   "iot-frontend": {
+    "cpu": 0.04,
+    "mem": 14.83
+   },
+   "_t": 1794119483.0536566
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.1,
+    "mem": 367.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.82,
+    "mem": 65.65
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 14.76
+   },
+   "_t": 1794119486.144141
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.13,
+    "mem": 367.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.42,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.94,
+    "mem": 65.47
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 14.73
+   },
+   "_t": 1794119489.2417634
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.47,
+    "mem": 368.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.2,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 1.13,
+    "mem": 65.21
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.71
+   },
+   "_t": 1794119492.3460183
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.22,
+    "mem": 367.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.57,
+    "mem": 65.55
+   },
+   "iot-frontend": {
+    "cpu": 0.06,
+    "mem": 15.01
+   },
+   "_t": 1794119495.4515526
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.39,
+    "mem": 367.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.39,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 2.09,
+    "mem": 65.69
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.79
+   },
+   "_t": 1794119498.565409
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.93,
+    "mem": 367.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 5.52,
+    "mem": 65.23
+   },
+   "iot-frontend": {
+    "cpu": 0.09,
+    "mem": 14.87
+   },
+   "_t": 1794119501.7255294
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 1.86,
+    "mem": 367.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.75,
+    "mem": 65.3
+   },
+   "iot-frontend": {
+    "cpu": 2.86,
+    "mem": 15.04
+   },
+   "_t": 1794119504.8366861
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 1.93,
+    "mem": 369.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.02,
+    "mem": 65.8
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.71
+   },
+   "_t": 1794119507.9438343
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 16.22,
+    "mem": 369.8
+   },
+   "iot-mosquitto": {
+    "cpu": 6.43,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 4.62,
+    "mem": 65.34
+   },
+   "iot-frontend": {
+    "cpu": 2.21,
+    "mem": 14.77
+   },
+   "_t": 1794119511.0627937
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.27,
+    "mem": 369.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.17,
+    "mem": 1.727
+   },
+   "iot-postgres": {
+    "cpu": 1.64,
+    "mem": 65.46
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 15.24
+   },
+   "_t": 1794119514.182904
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 1.71,
+    "mem": 369.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.83,
+    "mem": 65.74
+   },
+   "iot-frontend": {
+    "cpu": 0.05,
+    "mem": 14.87
+   },
+   "_t": 1794119517.314004
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 2.65,
+    "mem": 369.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.3,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.46,
+    "mem": 66.07
+   },
+   "iot-frontend": {
+    "cpu": 0.04,
+    "mem": 14.87
+   },
+   "_t": 1794119520.4118717
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 16.52,
+    "mem": 369.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.42,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.9,
+    "mem": 65.35
+   },
+   "iot-frontend": {
+    "cpu": 0.14,
+    "mem": 14.87
+   },
+   "_t": 1794119523.5783339
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.3,
+    "mem": 369.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.3,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 4.58,
+    "mem": 65.76
+   },
+   "iot-frontend": {
+    "cpu": 0.15,
+    "mem": 14.78
+   },
+   "_t": 1794119526.7087364
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 3.15,
+    "mem": 369.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.51,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 3.32,
+    "mem": 65.99
+   },
+   "iot-frontend": {
+    "cpu": 0.1,
+    "mem": 14.78
+   },
+   "_t": 1794119529.8366666
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 9.87,
+    "mem": 370.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.18,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 1.22,
+    "mem": 65.71
+   },
+   "iot-frontend": {
+    "cpu": 0.11,
+    "mem": 14.75
+   },
+   "_t": 1794119532.9754744
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 4.98,
+    "mem": 369.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 7.72,
+    "mem": 65.93
+   },
+   "iot-frontend": {
+    "cpu": 0.12,
+    "mem": 14.99
+   },
+   "_t": 1794119536.083714
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 0.48,
+    "mem": 369.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.27,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.17,
+    "mem": 65.98
+   },
+   "iot-frontend": {
+    "cpu": 0.08,
+    "mem": 14.79
+   },
+   "_t": 1794119539.191547
+  },
+  {
+   "label": "P7",
+   "iot-backend": {
+    "cpu": 6.85,
+    "mem": 370.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.19,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.2,
+    "mem": 65.5
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.77
+   },
+   "_t": 1794119542.3903651
+  },
+  {
+   "label": "idle",
+   "iot-backend": {
+    "cpu": 10.94,
+    "mem": 370.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.12,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.09,
+    "mem": 65.41
+   },
+   "iot-frontend": {
+    "cpu": 31.33,
+    "mem": 15.33
+   },
+   "_t": 1794119544.9576514
+  },
+  {
+   "label": "idle",
+   "iot-backend": {
+    "cpu": 3.89,
+    "mem": 369.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.25,
+    "mem": 1.723
+   },
+   "iot-postgres": {
+    "cpu": 0.46,
+    "mem": 66.0
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.77
+   },
+   "_t": 1794119548.5469782
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 16.38,
+    "mem": 370.7
+   },
+   "iot-mosquitto": {
+    "cpu": 0.26,
+    "mem": 1.828
+   },
+   "iot-postgres": {
+    "cpu": 7.02,
+    "mem": 65.95
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.77
+   },
+   "_t": 1794119553.4409115
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 76.26,
+    "mem": 370.4
+   },
+   "iot-mosquitto": {
+    "cpu": 2.02,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 56.93,
+    "mem": 66.68
+   },
+   "iot-frontend": {
+    "cpu": 0.13,
+    "mem": 14.78
+   },
+   "_t": 1794119557.3347554
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 59.52,
+    "mem": 370.2
+   },
+   "iot-mosquitto": {
+    "cpu": 2.69,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 30.99,
+    "mem": 66.72
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.78
+   },
+   "_t": 1794119561.2428477
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 19.38,
+    "mem": 368.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.94,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 7.33,
+    "mem": 65.93
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.78
+   },
+   "_t": 1794119564.8938527
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 8.81,
+    "mem": 369.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.56,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 3.78,
+    "mem": 66.06
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.98
+   },
+   "_t": 1794119568.0918477
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 27.34,
+    "mem": 368.8
+   },
+   "iot-mosquitto": {
+    "cpu": 0.86,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 12.36,
+    "mem": 66.55
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.74
+   },
+   "_t": 1794119571.3838832
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 109.13,
+    "mem": 371.3
+   },
+   "iot-mosquitto": {
+    "cpu": 0.75,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 10.34,
+    "mem": 66.61
+   },
+   "iot-frontend": {
+    "cpu": 0.07,
+    "mem": 15.19
+   },
+   "_t": 1794119575.4362402
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 246.68,
+    "mem": 371.5
+   },
+   "iot-mosquitto": {
+    "cpu": 1.24,
+    "mem": 1.844
+   },
+   "iot-postgres": {
+    "cpu": 46.7,
+    "mem": 67.65
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 15.03
+   },
+   "_t": 1794119578.60347
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 13.35,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 2.39,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 4.24,
+    "mem": 67.76
+   },
+   "iot-frontend": {
+    "cpu": 0.36,
+    "mem": 14.87
+   },
+   "_t": 1794119581.830489
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 11.73,
+    "mem": 370.9
+   },
+   "iot-mosquitto": {
+    "cpu": 0.73,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 3.17,
+    "mem": 67.65
+   },
+   "iot-frontend": {
+    "cpu": 0.21,
+    "mem": 14.79
+   },
+   "_t": 1794119585.1383533
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 6.74,
+    "mem": 371.4
+   },
+   "iot-mosquitto": {
+    "cpu": 0.72,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 3.26,
+    "mem": 67.84
+   },
+   "iot-frontend": {
+    "cpu": 0.4,
+    "mem": 14.89
+   },
+   "_t": 1794119588.3168426
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 26.7,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.72,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 13.18,
+    "mem": 67.82
+   },
+   "iot-frontend": {
+    "cpu": 0.23,
+    "mem": 14.77
+   },
+   "_t": 1794119591.59435
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 16.64,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.54,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 5.85,
+    "mem": 67.7
+   },
+   "iot-frontend": {
+    "cpu": 5.63,
+    "mem": 15.07
+   },
+   "_t": 1794119595.20784
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 8.07,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.51,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 3.36,
+    "mem": 67.75
+   },
+   "iot-frontend": {
+    "cpu": 0.43,
+    "mem": 14.77
+   },
+   "_t": 1794119598.3432128
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 39.7,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 0.83,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 6.02,
+    "mem": 68.06
+   },
+   "iot-frontend": {
+    "cpu": 0.36,
+    "mem": 14.87
+   },
+   "_t": 1794119601.679899
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 13.76,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 1.07,
+    "mem": 1.84
+   },
+   "iot-postgres": {
+    "cpu": 6.2,
+    "mem": 68.42
+   },
+   "iot-frontend": {
+    "cpu": 3.38,
+    "mem": 15.46
+   },
+   "_t": 1794119605.0381155
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 12.8,
+    "mem": 371.5
+   },
+   "iot-mosquitto": {
+    "cpu": 0.52,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 3.62,
+    "mem": 68.16
+   },
+   "iot-frontend": {
+    "cpu": 0.22,
+    "mem": 14.8
+   },
+   "_t": 1794119608.2115355
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 0.46,
+    "mem": 371.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.29,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 0.12,
+    "mem": 68.26
+   },
+   "iot-frontend": {
+    "cpu": 0.23,
+    "mem": 14.8
+   },
+   "_t": 1794119611.3789752
+  },
+  {
+   "label": "load10",
+   "iot-backend": {
+    "cpu": 0.97,
+    "mem": 371.0
+   },
+   "iot-mosquitto": {
+    "cpu": 0.16,
+    "mem": 1.836
+   },
+   "iot-postgres": {
+    "cpu": 4.28,
+    "mem": 68.3
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.8
+   },
+   "_t": 1794119614.572601
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 31.36,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 3.36,
+    "mem": 2.453
+   },
+   "iot-postgres": {
+    "cpu": 16.89,
+    "mem": 69.83
+   },
+   "iot-frontend": {
+    "cpu": 0.27,
+    "mem": 14.75
+   },
+   "_t": 1794119622.9933894
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 17.16,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 3.57,
+    "mem": 2.449
+   },
+   "iot-postgres": {
+    "cpu": 21.92,
+    "mem": 69.86
+   },
+   "iot-frontend": {
+    "cpu": 0.28,
+    "mem": 14.89
+   },
+   "_t": 1794119626.1297965
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 22.77,
+    "mem": 371.3
+   },
+   "iot-mosquitto": {
+    "cpu": 2.08,
+    "mem": 2.445
+   },
+   "iot-postgres": {
+    "cpu": 14.32,
+    "mem": 69.86
+   },
+   "iot-frontend": {
+    "cpu": 0.25,
+    "mem": 14.77
+   },
+   "_t": 1794119629.3095543
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 28.31,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 3.25,
+    "mem": 2.445
+   },
+   "iot-postgres": {
+    "cpu": 13.7,
+    "mem": 70.02
+   },
+   "iot-frontend": {
+    "cpu": 0.23,
+    "mem": 14.75
+   },
+   "_t": 1794119632.4774008
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 34.87,
+    "mem": 370.4
+   },
+   "iot-mosquitto": {
+    "cpu": 2.27,
+    "mem": 2.207
+   },
+   "iot-postgres": {
+    "cpu": 19.23,
+    "mem": 69.92
+   },
+   "iot-frontend": {
+    "cpu": 4.16,
+    "mem": 14.78
+   },
+   "_t": 1794119635.6637917
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 59.17,
+    "mem": 369.5
+   },
+   "iot-mosquitto": {
+    "cpu": 2.54,
+    "mem": 2.453
+   },
+   "iot-postgres": {
+    "cpu": 18.19,
+    "mem": 70.09
+   },
+   "iot-frontend": {
+    "cpu": 0.31,
+    "mem": 14.76
+   },
+   "_t": 1794119638.862653
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 132.09,
+    "mem": 369.6
+   },
+   "iot-mosquitto": {
+    "cpu": 3.48,
+    "mem": 2.211
+   },
+   "iot-postgres": {
+    "cpu": 34.51,
+    "mem": 70.36
+   },
+   "iot-frontend": {
+    "cpu": 0.0,
+    "mem": 14.73
+   },
+   "_t": 1794119642.2757945
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 182.75,
+    "mem": 373.2
+   },
+   "iot-mosquitto": {
+    "cpu": 3.24,
+    "mem": 2.223
+   },
+   "iot-postgres": {
+    "cpu": 49.04,
+    "mem": 70.52
+   },
+   "iot-frontend": {
+    "cpu": 15.09,
+    "mem": 14.73
+   },
+   "_t": 1794119646.0457234
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 95.07,
+    "mem": 371.7
+   },
+   "iot-mosquitto": {
+    "cpu": 2.92,
+    "mem": 2.445
+   },
+   "iot-postgres": {
+    "cpu": 35.52,
+    "mem": 70.34
+   },
+   "iot-frontend": {
+    "cpu": 0.41,
+    "mem": 14.71
+   },
+   "_t": 1794119649.3038454
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 24.6,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 2.68,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 15.03,
+    "mem": 70.82
+   },
+   "iot-frontend": {
+    "cpu": 0.28,
+    "mem": 14.71
+   },
+   "_t": 1794119652.6860712
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 36.66,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 3.4,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 25.37,
+    "mem": 71.17
+   },
+   "iot-frontend": {
+    "cpu": 0.26,
+    "mem": 14.71
+   },
+   "_t": 1794119655.9753158
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 56.5,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 2.24,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 17.59,
+    "mem": 70.79
+   },
+   "iot-frontend": {
+    "cpu": 0.34,
+    "mem": 14.75
+   },
+   "_t": 1794119659.2336886
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 23.18,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 3.78,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 13.65,
+    "mem": 71.48
+   },
+   "iot-frontend": {
+    "cpu": 0.17,
+    "mem": 14.71
+   },
+   "_t": 1794119662.4782214
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 14.67,
+    "mem": 371.2
+   },
+   "iot-mosquitto": {
+    "cpu": 3.03,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 8.43,
+    "mem": 70.82
+   },
+   "iot-frontend": {
+    "cpu": 4.32,
+    "mem": 15.35
+   },
+   "_t": 1794119665.775978
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 60.02,
+    "mem": 371.5
+   },
+   "iot-mosquitto": {
+    "cpu": 1.89,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 23.58,
+    "mem": 71.3
+   },
+   "iot-frontend": {
+    "cpu": 0.53,
+    "mem": 14.73
+   },
+   "_t": 1794119668.9965727
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 63.09,
+    "mem": 371.4
+   },
+   "iot-mosquitto": {
+    "cpu": 3.22,
+    "mem": 2.324
+   },
+   "iot-postgres": {
+    "cpu": 36.13,
+    "mem": 71.29
+   },
+   "iot-frontend": {
+    "cpu": 0.58,
+    "mem": 14.71
+   },
+   "_t": 1794119672.2798452
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 19.81,
+    "mem": 371.1
+   },
+   "iot-mosquitto": {
+    "cpu": 1.99,
+    "mem": 2.195
+   },
+   "iot-postgres": {
+    "cpu": 18.8,
+    "mem": 71.03
+   },
+   "iot-frontend": {
+    "cpu": 0.43,
+    "mem": 14.71
+   },
+   "_t": 1794119675.4770489
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 32.75,
+    "mem": 371.5
+   },
+   "iot-mosquitto": {
+    "cpu": 2.54,
+    "mem": 2.312
+   },
+   "iot-postgres": {
+    "cpu": 19.37,
+    "mem": 71.32
+   },
+   "iot-frontend": {
+    "cpu": 0.32,
+    "mem": 14.73
+   },
+   "_t": 1794119678.6138606
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 21.16,
+    "mem": 371.3
+   },
+   "iot-mosquitto": {
+    "cpu": 3.53,
+    "mem": 2.309
+   },
+   "iot-postgres": {
+    "cpu": 42.18,
+    "mem": 71.66
+   },
+   "iot-frontend": {
+    "cpu": 0.23,
+    "mem": 14.82
+   },
+   "_t": 1794119681.9085782
+  },
+  {
+   "label": "load50",
+   "iot-backend": {
+    "cpu": 31.41,
+    "mem": 371.6
+   },
+   "iot-mosquitto": {
+    "cpu": 0.15,
+    "mem": 2.23
+   },
+   "iot-postgres": {
+    "cpu": 6.0,
+    "mem": 71.62
+   },
+   "iot-frontend": {
+    "cpu": 0.64,
+    "mem": 15.0
+   },
+   "_t": 1794119685.0819433
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 63.32,
+    "mem": 373.8
+   },
+   "iot-mosquitto": {
+    "cpu": 4.95,
+    "mem": 2.965
+   },
+   "iot-postgres": {
+    "cpu": 36.37,
+    "mem": 72.59
+   },
+   "iot-frontend": {
+    "cpu": 1.8,
+    "mem": 14.98
+   },
+   "_t": 1794119698.0825608
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 61.91,
+    "mem": 373.8
+   },
+   "iot-mosquitto": {
+    "cpu": 8.08,
+    "mem": 2.832
+   },
+   "iot-postgres": {
+    "cpu": 41.0,
+    "mem": 72.94
+   },
+   "iot-frontend": {
+    "cpu": 1.82,
+    "mem": 14.75
+   },
+   "_t": 1794119701.4747798
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 64.18,
+    "mem": 373.8
+   },
+   "iot-mosquitto": {
+    "cpu": 5.65,
+    "mem": 3.062
+   },
+   "iot-postgres": {
+    "cpu": 37.09,
+    "mem": 73.13
+   },
+   "iot-frontend": {
+    "cpu": 0.58,
+    "mem": 14.75
+   },
+   "_t": 1794119704.9342961
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 57.71,
+    "mem": 373.8
+   },
+   "iot-mosquitto": {
+    "cpu": 4.09,
+    "mem": 2.984
+   },
+   "iot-postgres": {
+    "cpu": 33.06,
+    "mem": 72.85
+   },
+   "iot-frontend": {
+    "cpu": 1.19,
+    "mem": 14.79
+   },
+   "_t": 1794119708.1408985
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 63.38,
+    "mem": 374.0
+   },
+   "iot-mosquitto": {
+    "cpu": 3.51,
+    "mem": 3.027
+   },
+   "iot-postgres": {
+    "cpu": 36.29,
+    "mem": 73.2
+   },
+   "iot-frontend": {
+    "cpu": 0.87,
+    "mem": 14.75
+   },
+   "_t": 1794119711.769278
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 56.43,
+    "mem": 373.9
+   },
+   "iot-mosquitto": {
+    "cpu": 3.09,
+    "mem": 3.34
+   },
+   "iot-postgres": {
+    "cpu": 34.04,
+    "mem": 73.52
+   },
+   "iot-frontend": {
+    "cpu": 0.91,
+    "mem": 14.88
+   },
+   "_t": 1794119715.2759552
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 53.49,
+    "mem": 373.8
+   },
+   "iot-mosquitto": {
+    "cpu": 3.58,
+    "mem": 3.098
+   },
+   "iot-postgres": {
+    "cpu": 51.84,
+    "mem": 73.91
+   },
+   "iot-frontend": {
+    "cpu": 1.03,
+    "mem": 14.75
+   },
+   "_t": 1794119718.5553954
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 115.04,
+    "mem": 374.0
+   },
+   "iot-mosquitto": {
+    "cpu": 3.37,
+    "mem": 3.324
+   },
+   "iot-postgres": {
+    "cpu": 33.13,
+    "mem": 73.34
+   },
+   "iot-frontend": {
+    "cpu": 1.21,
+    "mem": 14.99
+   },
+   "_t": 1794119722.7433982
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 160.18,
+    "mem": 374.0
+   },
+   "iot-mosquitto": {
+    "cpu": 3.11,
+    "mem": 3.531
+   },
+   "iot-postgres": {
+    "cpu": 33.82,
+    "mem": 73.7
+   },
+   "iot-frontend": {
+    "cpu": 0.76,
+    "mem": 14.75
+   },
+   "_t": 1794119726.1007314
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 68.3,
+    "mem": 374.1
+   },
+   "iot-mosquitto": {
+    "cpu": 3.3,
+    "mem": 3.227
+   },
+   "iot-postgres": {
+    "cpu": 39.72,
+    "mem": 73.46
+   },
+   "iot-frontend": {
+    "cpu": 1.16,
+    "mem": 14.88
+   },
+   "_t": 1794119729.529777
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 61.93,
+    "mem": 374.1
+   },
+   "iot-mosquitto": {
+    "cpu": 4.35,
+    "mem": 3.469
+   },
+   "iot-postgres": {
+    "cpu": 34.2,
+    "mem": 73.93
+   },
+   "iot-frontend": {
+    "cpu": 1.17,
+    "mem": 14.87
+   },
+   "_t": 1794119732.8185728
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 127.06,
+    "mem": 374.3
+   },
+   "iot-mosquitto": {
+    "cpu": 3.36,
+    "mem": 3.34
+   },
+   "iot-postgres": {
+    "cpu": 34.04,
+    "mem": 74.02
+   },
+   "iot-frontend": {
+    "cpu": 1.21,
+    "mem": 14.75
+   },
+   "_t": 1794119736.2464213
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 56.11,
+    "mem": 374.3
+   },
+   "iot-mosquitto": {
+    "cpu": 3.26,
+    "mem": 3.344
+   },
+   "iot-postgres": {
+    "cpu": 105.8,
+    "mem": 74.04
+   },
+   "iot-frontend": {
+    "cpu": 1.1,
+    "mem": 14.96
+   },
+   "_t": 1794119739.5602524
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 52.64,
+    "mem": 374.0
+   },
+   "iot-mosquitto": {
+    "cpu": 3.33,
+    "mem": 3.426
+   },
+   "iot-postgres": {
+    "cpu": 34.02,
+    "mem": 74.39
+   },
+   "iot-frontend": {
+    "cpu": 1.66,
+    "mem": 14.73
+   },
+   "_t": 1794119742.693426
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 74.93,
+    "mem": 374.6
+   },
+   "iot-mosquitto": {
+    "cpu": 3.68,
+    "mem": 3.211
+   },
+   "iot-postgres": {
+    "cpu": 34.47,
+    "mem": 74.41
+   },
+   "iot-frontend": {
+    "cpu": 4.07,
+    "mem": 14.73
+   },
+   "_t": 1794119745.842845
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 54.36,
+    "mem": 374.2
+   },
+   "iot-mosquitto": {
+    "cpu": 3.45,
+    "mem": 3.168
+   },
+   "iot-postgres": {
+    "cpu": 34.96,
+    "mem": 81.69
+   },
+   "iot-frontend": {
+    "cpu": 1.46,
+    "mem": 14.82
+   },
+   "_t": 1794119748.9816427
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 51.95,
+    "mem": 374.4
+   },
+   "iot-mosquitto": {
+    "cpu": 3.51,
+    "mem": 3.199
+   },
+   "iot-postgres": {
+    "cpu": 34.48,
+    "mem": 75.26
+   },
+   "iot-frontend": {
+    "cpu": 1.44,
+    "mem": 14.73
+   },
+   "_t": 1794119752.0753736
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 37.08,
+    "mem": 374.3
+   },
+   "iot-mosquitto": {
+    "cpu": 2.54,
+    "mem": 2.898
+   },
+   "iot-postgres": {
+    "cpu": 18.25,
+    "mem": 75.5
+   },
+   "iot-frontend": {
+    "cpu": 1.32,
+    "mem": 14.72
+   },
+   "_t": 1794119755.239449
+  },
+  {
+   "label": "load100",
+   "iot-backend": {
+    "cpu": 0.41,
+    "mem": 374.2
+   },
+   "iot-mosquitto": {
+    "cpu": 0.23,
+    "mem": 2.898
+   },
+   "iot-postgres": {
+    "cpu": 0.33,
+    "mem": 75.28
+   },
+   "iot-frontend": {
+    "cpu": 4.36,
+    "mem": 15.27
+   },
+   "_t": 1794119758.3699145
+  }
+ ]
+}
