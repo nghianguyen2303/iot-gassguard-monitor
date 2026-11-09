@@ -1,0 +1,111 @@
+# ============================================================================
+# Hạ tầng + ứng dụng GasGuard.
+#   Chỉ hạ tầng (dev: backend chạy trong IntelliJ, frontend chạy npm run dev):
+#       docker compose --env-file ../.env up -d
+#   Toàn bộ hệ thống (demo / triển khai):
+#       docker compose --env-file ../.env --profile app up -d --build
+# Mọi bí mật lấy từ file .env (không commit). Không có mật khẩu nào trong file này.
+# Chứng chỉ TLS (deployment/certs/ca, deployment/certs/server; không commit) phải tạo trước bằng
+# deployment/certs/gen-certs.sh.
+# ============================================================================
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.20
+    container_name: iot-mosquitto
+    ports:
+      # MQTT không mã hóa: chỉ mở cho chính máy chủ (công cụ quản trị, kiểm thử). Backend dùng mạng nội bộ Docker.
+      - "127.0.0.1:1883:1883"
+      # MQTT qua TLS cho thiết bị trong LAN. Cổng ngoài đổi được bằng MQTT_TLS_PORT trong .env
+      # (khi Windows đã giữ cổng 8883); trong container broker vẫn nghe 8883.
+      - "${MQTT_TLS_PORT:-8883}:8883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Chỉ gắn thư mục chứng chỉ máy chủ; khóa của CA (certs/ca/) không vào container nào
+      - ./certs/server:/mosquitto/certs:ro
+      - mosquitto-data:/mosquitto/data
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: iot-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "15432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    profiles: ["app"]
+    build: ../backend
+    image: gasguard/backend:1.0.0
+    container_name: iot-backend
+    # Chỉ truyền đúng các biến backend cần (không đưa MQTT_ADMIN_PASSWORD vào container)
+    environment:
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Thiếu POSTGRES_PASSWORD trong .env}
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_BACKEND_PASSWORD: ${MQTT_BACKEND_PASSWORD:?Thiếu MQTT_BACKEND_PASSWORD trong .env}
+      # Địa chỉ broker hiển thị khi cấp thông tin xác thực cho thiết bị (ssl:// = MQTT qua TLS)
+      MQTT_DEVICE_URL: ${MQTT_DEVICE_URL:-ssl://localhost:8883}
+      JWT_SECRET: ${JWT_SECRET:?Thiếu JWT_SECRET trong .env}
+      APP_ADMIN_PASSWORD: ${APP_ADMIN_PASSWORD:?Thiếu APP_ADMIN_PASSWORD trong .env}
+      OFFLINE_TIMEOUT_SEC: ${OFFLINE_TIMEOUT_SEC:-30}
+      # Cảnh báo qua email (Gmail SMTP): bỏ trống MAIL_USERNAME / MAIL_PASSWORD = tắt
+      MAIL_HOST: ${MAIL_HOST:-smtp.gmail.com}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM_NAME: ${MAIL_FROM_NAME:-GasGuard}
+      # Cảnh báo Telegram (tùy chọn): bỏ trống token = tắt
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_API_BASE: ${TELEGRAM_API_BASE:-https://api.telegram.org}
+      APP_PUBLIC_URL: ${APP_PUBLIC_URL:-}
+      JAVA_OPTS: "-Xms128m -Xmx384m -XX:+UseSerialGC"
+    # DNS công cộng cho backend (Gmail SMTP, Telegram). Tên nội bộ (postgres, mosquitto) vẫn do Docker phân giải.
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    # Chỉ mở cho máy local (để gọi thử API); người dùng truy cập qua frontend
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+
+  frontend:
+    profiles: ["app"]
+    build: ../frontend
+    image: gasguard/frontend:1.0.0
+    container_name: iot-frontend
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      # Cổng HTTPS nhìn từ trình duyệt: dùng để chuyển hướng http -> https
+      WEB_HTTPS_PORT: ${WEB_HTTPS_PORT:-8443}
+    volumes:
+      - ./certs/server:/etc/nginx/certs:ro
+    ports:
+      # HTTP chỉ để chuyển hướng sang HTTPS
+      - "${WEB_PORT:-8088}:80"
+      - "${WEB_HTTPS_PORT:-8443}:443"
+    restart: unless-stopped
+
+volumes:
+  mosquitto-data:
+  pg-data:
