@@ -1,0 +1,71 @@
+spring:
+  autoconfigure:
+    # Tắt tài khoản tạm "generated security password" vì đã dùng JWT + bảng users
+    exclude: org.springframework.boot.autoconfigure.security.servlet.UserDetailsServiceAutoConfiguration
+  application:
+    name: iot-backend
+  config:
+    import: optional:file:../.env[.properties]
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:15432}/${POSTGRES_DB}
+    username: ${POSTGRES_USER}
+    password: ${POSTGRES_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  flyway:
+    enabled: true
+  jackson:
+    time-zone: UTC
+
+server:
+  port: 8080
+  # Sau reverse proxy nginx: lấy IP client thật từ X-Forwarded-For, chỉ khi request đến từ proxy nội bộ
+  forward-headers-strategy: native
+
+app:
+  mqtt:
+    url: tcp://${MQTT_HOST:localhost}:${MQTT_PORT:1883}
+    username: backend
+    password: ${MQTT_BACKEND_PASSWORD}
+    client-id: iot-backend
+    # Địa chỉ broker mà THIẾT BỊ dùng (IP LAN của máy chạy Docker), trả về khi cấp thông tin xác thực
+    device-url: ${MQTT_DEVICE_URL:tcp://localhost:1883}
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-minutes: 60
+  alert:
+    # Không nhận bản tin nào quá N giây -> OFFLINE (nên = 3 x chu kỳ heartbeat)
+    offline-timeout-sec: ${OFFLINE_TIMEOUT_SEC:30}
+  # Cảnh báo qua Telegram (bỏ trống token = tắt). Nhà mạng chặn api.telegram.org thì đổi TELEGRAM_API_BASE sang relay.
+  telegram:
+    bot-token: ${TELEGRAM_BOT_TOKEN:}
+    api-base: ${TELEGRAM_API_BASE:https://api.telegram.org}
+  # Gửi cảnh báo qua email (mặc định Gmail). Bỏ trống MAIL_USERNAME/MAIL_PASSWORD = tắt.
+  # Gmail: bật Xác minh 2 bước rồi tạo "Mật khẩu ứng dụng" 16 ký tự làm MAIL_PASSWORD.
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:}
+    from-name: ${MAIL_FROM_NAME:GasGuard}
+    auth: ${MAIL_SMTP_AUTH:true}
+    starttls: ${MAIL_STARTTLS:true}
+    ssl: ${MAIL_SSL:false}
+  # Địa chỉ web công khai, dùng làm link trong tin nhắn / email (bỏ trống/localhost = không chèn link)
+  public-url: ${APP_PUBLIC_URL:}
+  bootstrap-admin:
+    username: admin
+    password: ${APP_ADMIN_PASSWORD}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
