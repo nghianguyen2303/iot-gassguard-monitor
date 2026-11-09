@@ -1,0 +1,50 @@
+# Báo cáo kiểm thử phi chức năng (7.2) – GasGuard
+
+- Thời điểm chạy: **23:37:34 08/11/2026** (giờ Việt Nam)
+- Thời gian chạy: 229 s
+- API: `http://127.0.0.1:8080`
+- WebSocket: `ws://127.0.0.1:8080/ws`
+- MQTT: `127.0.0.1:1883`
+- MQTT/TLS: `127.0.0.1:8884`
+- Web HTTPS: `https://127.0.0.1:8443`
+- Máy chạy test: `Windows 10 / Python 3.11.7`
+## Tổng hợp
+
+| Mã | Chỉ tiêu | Kết quả đo | So với mục tiêu |
+|---|---|---|---|
+| P6 | Mức sử dụng CPU và bộ nhớ | RAM backend max 401 MiB | ✅ Đạt |
+| P8 | Số lượng thiết bị / bản tin hệ thống xử lý được | 100 thiết bị, mất 0 bản tin, P95 758.0 ms | ✅ Đạt |
+
+## P6 – Mức sử dụng CPU và bộ nhớ
+
+**Phương pháp đo.** Lấy mẫu mỗi ~2 s bằng `docker stats` cho từng thành phần, lúc nghỉ và trong từng mức tải của P8. CPU tính theo % một nhân (100 % = 1 nhân).
+
+**Dữ liệu đo.**
+
+| Số thiết bị | CPU backend TB % | CPU backend max % | RAM backend max (MiB) | CPU broker TB % | RAM broker max (MiB) | CPU CSDL TB % | RAM CSDL max (MiB) |
+|---|---|---|---|---|---|---|---|
+| 0 (nghỉ) | 2.3 | 4.5 | 372.5 | 0.1 | 3.3 | 1.1 | 54.8 |
+| 10 | 22.6 | 45.8 | 388.6 | 0.3 | 3.4 | 4.0 | 56.8 |
+| 50 | 38.3 | 155.1 | 398.0 | 1.3 | 4.1 | 10.3 | 60.1 |
+| 100 | 29.7 | 54.7 | 401.0 | 2.5 | 5.0 | 18.6 | 64.5 |
+
+**Nhận xét.** Broker Mosquitto rất nhẹ (vài MiB RAM). Backend Java dùng nhiều RAM nhất nhưng bị giới hạn heap 384 MB (`JAVA_OPTS`) nên vừa với máy 8 GB RAM; CPU tăng gần tuyến tính theo số bản tin/giây. Thiết bị ESP32 (firmware) dùng khoảng 15 % RAM và 74 % flash theo kết quả biên dịch.
+
+## P8 – Số lượng thiết bị / bản tin hệ thống xử lý được
+
+**Phương pháp đo.** Tăng dần số thiết bị mô phỏng kết nối đồng thời (10, 50, 100); mỗi thiết bị gửi 1 bản tin/giây (QoS1, mỗi bản tin 2 chỉ số) trong 60 s. Đo thông lượng backend chấp nhận, số bản tin lưu được, tỷ lệ mất, P95 độ trễ thiết bị → backend.
+
+**Dữ liệu đo.**
+
+| Số thiết bị | Bản tin gửi/s | Backend xử lý/s | Đã gửi | Đã lưu | Mất | P95 độ trễ (ms) | Bị từ chối |
+|---|---|---|---|---|---|---|---|
+| 10 | 10 | 10 | 600 | 600 | 0.00 % | 187.0 | 0 |
+| 50 | 50 | 50 | 3000 | 3000 | 0.00 % | 255.0 | 0 |
+| 100 | 100 | 100 | 6000 | 6000 | 0.00 % | 758.0 | 0 |
+
+**Nhận xét.** Hệ thống xử lý 100 thiết bị đồng thời (100 bản tin/s ≈ 500 thiết bị thật với chu kỳ 5 s) không mất bản tin, P95 < 1000 ms. Giới hạn chính là ghi CSDL (mỗi bản tin 1 giao dịch); có thể tăng bằng ghi theo lô nếu cần nhiều thiết bị hơn.
+
+## Số liệu thô
+
+Toàn bộ số liệu đo (từng mẫu độ trễ, CPU/RAM) nằm trong file JSON cùng tên. Độ lệch đồng hồ backend so với máy chạy test đo được +14.8 ms (phương pháp kiểu NTP qua `generatedAt` của API, sai số vài ms). Độ lệch < 50 ms nên không hiệu chỉnh (không đáng kể).
+

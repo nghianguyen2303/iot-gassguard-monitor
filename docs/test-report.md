@@ -43,14 +43,98 @@ Môi trường: API `http://127.0.0.1:8080`, WebSocket `ws://127.0.0.1:8080/ws`,
 
 ## 2. Kiểm thử phi chức năng (7.2)
 
-Lần chạy: 2026-11-08 23:37:34. Số liệu thô (từng mẫu): [`tests/reports/perf-20261108-233734.json`](../tests/reports/perf-20261108-233734.json).
+Mỗi chỉ tiêu lấy từ lần đo gần nhất có chỉ tiêu đó. Số liệu thô (từng mẫu) trong file JSON của lần đo:
+
+| Lần đo | Chỉ tiêu | Số liệu thô |
+|---|---|---|
+| 2026-11-08 13:18 | P1, P2, P3, P4, P5, P7 | [`tests/reports/perf-20261108-131845.json`](../tests/reports/perf-20261108-131845.json) |
+| 2026-11-08 23:37 | P6, P8 | [`tests/reports/perf-20261108-233734.json`](../tests/reports/perf-20261108-233734.json) |
 
 ### Tổng hợp
 
-| Mã | Chỉ tiêu | Kết quả đo | So với mục tiêu |
+| Mã | Chỉ tiêu | Kết quả đo | So với mục tiêu | Lần đo |
+|---|---|---|---|---|
+| P1 | Độ trễ từ cảm biến đến dashboard | P95 24.5 ms, nhận 200/200 | ✅ Đạt | 2026-11-08 13:18 |
+| P2 | Độ trễ của lệnh điều khiển | P95 151.9 ms, 50/50 thành công | ✅ Đạt | 2026-11-08 13:18 |
+| P3 | Tỷ lệ mất bản tin | QoS1 mất 0.00 % | ✅ Đạt | 2026-11-08 13:18 |
+| P4 | Khả năng hoạt động sau khi mất và khôi phục mạng | OFFLINE sau 1.0 s, gửi bù 20/20 | ✅ Đạt | 2026-11-08 13:18 |
+| P5 | Khả năng xử lý bản tin trùng lặp | lưu 200/200, bỏ qua 400 trùng | ✅ Đạt | 2026-11-08 13:18 |
+| P6 | Mức sử dụng CPU và bộ nhớ | RAM backend max 401 MiB | ✅ Đạt | 2026-11-08 23:37 |
+| P7 | Độ ổn định khi chạy liên tục | mất 0.000 %, RAM +3.4 % | ✅ Đạt | 2026-11-08 13:18 |
+| P8 | Số lượng thiết bị / bản tin hệ thống xử lý được | 100 thiết bị, mất 0 bản tin, P95 758.0 ms | ✅ Đạt | 2026-11-08 23:37 |
+
+### P1 – Độ trễ từ cảm biến đến dashboard
+
+**Phương pháp đo.** 1 thiết bị mô phỏng gửi 200 bản tin telemetry QoS1, mỗi 200 ms, ghi thời điểm đo `ts`. Một client WebSocket/STOMP đăng nhập giống trình duyệt, đăng ký kênh realtime của thiết bị và ghi thời điểm nhận từng bản tin. Độ trễ = thời điểm dashboard nhận − `ts`. Backend cũng ghi `receivedAt` để tách phần MQTT/xử lý.
+
+**Dữ liệu đo.**
+
+| Đại lượng (ms) | Số mẫu | Min | TB | P50 | P95 | Max |
+|---|---|---|---|---|---|---|
+| Thiết bị → backend nhận (MQTT + kiểm tra) | 200 | 1.0 | 4.8 | 4.9 | 7.4 | 11.2 |
+| Thiết bị → dashboard nhận (đầu-cuối) | 200 | 6.1 | 15.9 | 14.4 | 24.5 | 196.3 |
+
+Đã gửi 200 bản tin, dashboard nhận 200 bản tin.
+
+**Nhận xét.** P95 đầu-cuối 24.5 ms, mục tiêu ≤ 1000 ms → đạt. Phần lớn độ trễ nằm ở chặng thiết bị → backend (P50 4.9 ms); chặng đẩy WebSocket chỉ thêm khoảng 9.5 ms. Với ESP32 thật qua WiFi, độ trễ tăng thêm thời gian truyền WiFi (thường 5–50 ms); xem cột Độ trễ TB ở tab Dữ liệu của thiết bị thật.
+
+### P2 – Độ trễ của lệnh điều khiển
+
+**Phương pháp đo.** Gửi 50 lệnh (FAN_SET bật/tắt xen kẽ PING) qua REST API với `waitMs=5000`. Backend lưu lệnh, publish xuống topic `cmd` (QoS1) và ghi `latencyMs` = thời điểm nhận `cmd/ack` − thời điểm gửi. Phía client đo thêm thời gian khứ hồi toàn bộ của lời gọi API (người dùng bấm nút → thấy kết quả).
+
+**Dữ liệu đo.**
+
+| Đại lượng (ms) | Số mẫu | Min | TB | P50 | P95 | Max |
+|---|---|---|---|---|---|---|
+| Backend gửi → nhận ACK | 50 | 7 | 94.8 | 53.5 | 65.1 | 2169 |
+| Khứ hồi API (người dùng) | 50 | 120.2 | 182.1 | 139.7 | 151.9 | 2301.0 |
+
+Kết quả lệnh: {'SUCCESS': 50}
+
+**Nhận xét.** 50/50 lệnh thành công; P95 khứ hồi 151.9 ms, mục tiêu ≤ 1000 ms → đạt. Chênh lệch giữa hai dòng là thời gian lưu CSDL, kiểm tra quyền và ghi audit log.
+
+### P3 – Tỷ lệ mất bản tin
+
+**Phương pháp đo.** Mỗi mức QoS: 1 thiết bị mô phỏng gửi 1000 bản tin liên tục với tốc độ 50 bản tin/giây (nhanh hơn nhiều lần thực tế 1 bản tin / 5 s). Đếm số bản tin backend đã lưu trong CSDL trong khoảng thời gian gửi. Tỷ lệ mất = (gửi − lưu) / gửi. Cột cuối là ước lượng của chính hệ thống dựa trên khoảng trống `seq` (hiển thị ở tab Dữ liệu của web).
+
+**Dữ liệu đo.**
+
+| Chế độ | Đã gửi | Tốc độ | Đã lưu | Mất (đếm) | Mất (ước lượng theo seq) |
+|---|---|---|---|---|---|
+| QoS 1 | 1000 | 50/s | 1000 | 0.00 % | 0.00 % |
+| QoS 0 | 1000 | 50/s | 1000 | 0.00 % | 0.00 % |
+
+**Nhận xét.** Telemetry dùng QoS1: không mất bản tin nào (mục tiêu 0 %). QoS0 chỉ dùng cho heartbeat vì mất 1 heartbeat không ảnh hưởng (backend chỉ đánh OFFLINE sau 30 s không có tín hiệu). Chỉ số ước lượng theo seq khớp với số đếm thực tế, chứng tỏ có thể dùng để theo dõi thiết bị thật.
+
+### P4 – Khả năng hoạt động sau khi mất và khôi phục mạng
+
+**Phương pháp đo.** (a) Ngắt đột ngột kết nối TCP của thiết bị (giống rút điện / mất WiFi, không gửi DISCONNECT), đo thời gian đến khi backend chuyển OFFLINE. Trong 20 s mất mạng thiết bị vẫn đo mỗi giây và lưu đệm (giống firmware: bộ đệm 120 bản đo), kết nối lại thì gửi bù kèm thời điểm đo gốc; đếm số bản đo được lưu. (b) Khởi động lại broker MQTT trong khi thiết bị gửi 2 bản tin/giây; đo thời gian backend và thiết bị tự kết nối lại và đếm bản tin bị mất. (c) Khởi động lại backend trong khi thiết bị vẫn gửi; đếm bản tin được lưu sau khi backend chạy lại.
+
+**Dữ liệu đo.**
+
+| Tình huống | Đại lượng | Giá trị | Cơ chế |
 |---|---|---|---|
-| P6 | Mức sử dụng CPU và bộ nhớ | RAM backend max 401 MiB | ✅ Đạt |
-| P8 | Số lượng thiết bị / bản tin hệ thống xử lý được | 100 thiết bị, mất 0 bản tin, P95 758.0 ms | ✅ Đạt |
+| Thiết bị mất điện / mất WiFi đột ngột | OFFLINE sau | 1.0 s | LWT của broker |
+| Thiết bị kết nối lại | ONLINE sau | 0.1 s | bản tin status ONLINE |
+| Dữ liệu đo trong 20 s mất mạng | Đã lưu sau khi gửi bù | 20/20 | giữ đúng thời điểm đo gốc |
+| Broker khởi động lại (`docker restart iot-mosquitto`) | Backend + thiết bị kết nối lại sau | 4.0 s | tự kết nối lại |
+| Bản tin QoS1 gửi trong lúc broker gián đoạn | Đã lưu | 24/24 | client giữ hàng đợi và gửi lại |
+| Backend khởi động lại (`docker restart iot-backend`) | Backend hoạt động lại sau | 16.2 s | phiên MQTT bền |
+| Bản tin gửi trong lúc backend ngừng | Đã lưu | 50/50 | broker xếp hàng QoS1 cho backend |
+
+**Nhận xét.** Mất kết nối đột ngột được phát hiện sau 1.0 s nhờ LWT (mục tiêu ≤ 30 s; nếu không có LWT, watchdog backend vẫn đánh OFFLINE sau 30 s không có tín hiệu). Dữ liệu trong thời gian mất mạng không bị mất vì thiết bị đệm và gửi bù, CSDL không trùng nhờ khóa (thiết bị, chỉ số, thời điểm). Khi broker gián đoạn, backend tự kết nối lại (client MQTT mới, giãn dần 1 → 30 s). Backend dùng phiên MQTT bền (cleanSession=false): trong lúc backend hoặc broker khởi động lại, broker giữ đăng ký và xếp hàng bản tin QoS1 nên dữ liệu không mất.
+
+### P5 – Khả năng xử lý bản tin trùng lặp
+
+**Phương pháp đo.** Gửi 200 bản tin khác nhau, sau đó gửi lại đúng 200 bản tin đó lần nữa (cùng `seq`, cùng `ts`), mô phỏng QoS1 giao lại hoặc thiết bị gửi bù trùng sau khi mất mạng. Đếm số bản ghi trong CSDL và bộ đếm `duplicateReadingsIgnored` của backend (mỗi bản tin có 2 chỉ số gas + temp).
+
+**Dữ liệu đo.**
+
+| Bản tin khác nhau | Tổng đã gửi | Đã lưu (gas) | Số đo trùng bị bỏ qua |
+|---|---|---|---|
+| 200 | 400 | 200 | 400 |
+
+**Nhận xét.** CSDL lưu đúng 200/200 bản tin, không có bản ghi trùng; 400 số đo trùng bị bỏ qua nhờ ràng buộc UNIQUE(device_id, metric, ts) + INSERT … ON CONFLICT DO NOTHING. Cảnh báo cũng không bị sinh lặp vì cảnh báo đang mở được gộp theo (thiết bị, loại, luật).
 
 ### P6 – Mức sử dụng CPU và bộ nhớ
 
@@ -67,6 +151,29 @@ Lần chạy: 2026-11-08 23:37:34. Số liệu thô (từng mẫu): [`tests/repo
 
 **Nhận xét.** Broker Mosquitto rất nhẹ (vài MiB RAM). Backend Java dùng nhiều RAM nhất nhưng bị giới hạn heap 384 MB (`JAVA_OPTS`) nên vừa với máy 8 GB RAM; CPU tăng gần tuyến tính theo số bản tin/giây. Thiết bị ESP32 (firmware) dùng khoảng 15 % RAM và 74 % flash theo kết quả biên dịch.
 
+### P7 – Độ ổn định khi chạy liên tục
+
+**Phương pháp đo.** 5 thiết bị mô phỏng, mỗi thiết bị gửi 1 bản tin/giây (5 lần dày hơn cấu hình mặc định 5 s) liên tục 10 phút. Mỗi phút đếm bản tin đã gửi / đã lưu, P95 độ trễ thiết bị → backend (bộ đếm của backend), số bản tin bị từ chối, RAM của backend.
+
+**Dữ liệu đo.**
+
+| Phút | Đã gửi | Đã lưu | Mất | P95 độ trễ (ms) | Bị từ chối | RAM backend (MiB) |
+|---|---|---|---|---|---|---|
+| 1 | 300 | 300 | 0.00 % | 3964.0 | 0 | 358 |
+| 2 | 300 | 300 | 0.00 % | 475.0 | 0 | 360 |
+| 3 | 300 | 300 | 0.00 % | 100.0 | 0 | 362 |
+| 4 | 300 | 300 | 0.00 % | 117.0 | 0 | 365 |
+| 5 | 300 | 300 | 0.00 % | 153.0 | 0 | 366 |
+| 6 | 300 | 300 | 0.00 % | 184.0 | 0 | 367 |
+| 7 | 300 | 300 | 0.00 % | 184.0 | 0 | 367 |
+| 8 | 300 | 300 | 0.00 % | 163.0 | 0 | 368 |
+| 9 | 300 | 300 | 0.00 % | 133.0 | 0 | 368 |
+| 10 | 300 | 300 | 0.00 % | 94.0 | 0 | 370 |
+
+Tổng: gửi 3000, lưu 3000, mất 0.000 %. Thời gian chạy 628 s.
+
+**Nhận xét.** Trong 10 phút không mất bản tin (0.000 %), không có lỗi, độ trễ ổn định; RAM backend thay đổi +3.4 % giữa phút đầu và phút cuối (heap giới hạn 384 MB nên không tăng vô hạn). Có thể chạy dài hơn bằng `--stability-min 60`.
+
 ### P8 – Số lượng thiết bị / bản tin hệ thống xử lý được
 
 **Phương pháp đo.** Tăng dần số thiết bị mô phỏng kết nối đồng thời (10, 50, 100); mỗi thiết bị gửi 1 bản tin/giây (QoS1, mỗi bản tin 2 chỉ số) trong 60 s. Đo thông lượng backend chấp nhận, số bản tin lưu được, tỷ lệ mất, P95 độ trễ thiết bị → backend.
@@ -80,6 +187,9 @@ Lần chạy: 2026-11-08 23:37:34. Số liệu thô (từng mẫu): [`tests/repo
 | 100 | 100 | 100 | 6000 | 6000 | 0.00 % | 758.0 | 0 |
 
 **Nhận xét.** Hệ thống xử lý 100 thiết bị đồng thời (100 bản tin/s ≈ 500 thiết bị thật với chu kỳ 5 s) không mất bản tin, P95 < 1000 ms. Giới hạn chính là ghi CSDL (mỗi bản tin 1 giao dịch); có thể tăng bằng ghi theo lô nếu cần nhiều thiết bị hơn.
+
+- Lần đo 2026-11-08 13:18 (P1, P2, P3, P4, P5, P7): Độ lệch đồng hồ backend so với máy chạy test đo được +6.2 ms (phương pháp kiểu NTP qua `generatedAt` của API, sai số vài ms). Độ lệch < 50 ms nên không hiệu chỉnh (không đáng kể).
+- Lần đo 2026-11-08 23:37 (P6, P8): Độ lệch đồng hồ backend so với máy chạy test đo được +14.8 ms (phương pháp kiểu NTP qua `generatedAt` của API, sai số vài ms). Độ lệch < 50 ms nên không hiệu chỉnh (không đáng kể).
 
 ## 3. Kiểm thử với thiết bị thật (ESP32)
 
