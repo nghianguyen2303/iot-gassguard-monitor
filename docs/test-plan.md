@@ -129,7 +129,7 @@ An toàn khi làm H5: lượng gas rất nhỏ, nơi thoáng, không có lửa.
 ## 8. Cách chạy và nơi lưu bằng chứng
 
 ```powershell
-cd E:\IOT\iot-gas-monitor
+cd E:\iot-gassguard-monitor
 pip install -r tests\requirements.txt
 python tests\e2e\run_e2e.py            # ~3 phút
 python tests\perf\run_perf.py          # ~20 phút (hoặc --quick ~8 phút)

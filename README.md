@@ -270,8 +270,8 @@ Dừng: `docker compose --env-file ..\.env --profile app down` (trong `deploymen
 mất khi thêm `-v`.
 
 **Lệnh tắt.** [`deployment/dev-shell.ps1`](deployment/dev-shell.ps1) nạp sẵn các lệnh `app-up`, `app-down`,
-`app-logs`, `dc`, `mqctrl`, `psql`. File đang đặt đường dẫn repo là `E:\IOT\iot-gas-monitor` (biến `$IOT_ROOT` ở đầu
-file); clone vào chỗ khác thì sửa dòng này. Nạp bằng:
+`app-logs`, `dc`, `mqctrl`, `psql`. Nạp khi đang đứng ở thư mục gốc repo, script tự lấy thư mục
+hiện tại làm `$IOT_ROOT` (hoặc đặt biến môi trường `IOT_ROOT` trước khi nạp):
 `iex (Get-Content -Raw .\deployment\dev-shell.ps1)`.
 
 ### 5.6. Kết nối thiết bị

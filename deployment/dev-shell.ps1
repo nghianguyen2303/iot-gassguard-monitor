@@ -1,10 +1,16 @@
 # ============================================================================
 # Lenh tat cho moi truong dev. Nap vao terminal PowerShell bang 1 dong:
-#   iex (Get-Content -Raw E:\IOT\iot-gas-monitor\deployment\dev-shell.ps1)
+#   cd E:\iot-gassguard-monitor
+#   iex (Get-Content -Raw .\deployment\dev-shell.ps1)
 # (Dung iex nen khong bi chan boi Execution Policy cua Windows.)
 # File nay KHONG chua mat khau: moi gia tri bi mat doc tu file .env (khong commit).
 # ============================================================================
-$global:IOT_ROOT = "E:\IOT\iot-gas-monitor"
+# Thu muc repo: bien moi truong IOT_ROOT neu co; neu khong thi thu muc hien tai (khi dang dung o goc repo);
+# cuoi cung la duong dan mac dinh. (iex khong co $PSScriptRoot nen khong tu biet vi tri file.)
+if ($env:IOT_ROOT) { $global:IOT_ROOT = $env:IOT_ROOT }
+elseif (Test-Path (Join-Path (Get-Location).Path "deployment\docker-compose.yml")) { $global:IOT_ROOT = (Get-Location).Path }
+else { $global:IOT_ROOT = "E:\iot-gassguard-monitor" }
+Write-Host "IOT_ROOT = $global:IOT_ROOT" -ForegroundColor DarkGray
 $global:IOT_ENV  = Join-Path $IOT_ROOT ".env"
 $global:IOT_COMPOSE = Join-Path $IOT_ROOT "deployment\docker-compose.yml"
 

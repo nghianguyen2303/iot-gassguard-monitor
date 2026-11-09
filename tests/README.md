@@ -21,7 +21,7 @@ thật làm theo mục 6 của kế hoạch và ghi vào `docs/hardware-test-res
 Hệ thống phải đang chạy (`app-up`, hoặc backend IntelliJ + `dc up -d`). PowerShell:
 
 ```powershell
-cd E:\IOT\iot-gas-monitor
+cd E:\iot-gassguard-monitor
 pip install -r tests\requirements.txt      # lần đầu (psutil không bắt buộc)
 
 python tests\e2e\run_e2e.py                 # ~5 phút

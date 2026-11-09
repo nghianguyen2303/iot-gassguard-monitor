@@ -30,7 +30,8 @@
 ## Chạy toàn bộ hệ thống
 
 ```powershell
-iex (Get-Content -Raw E:\IOT\iot-gas-monitor\deployment\dev-shell.ps1)
+cd E:\iot-gassguard-monitor     # thư mục gốc repo
+iex (Get-Content -Raw .\deployment\dev-shell.ps1)
 app-up          # build image + chạy mosquitto, postgres, backend, frontend
 dc ps           # kiểm tra: backend, frontend phải là (healthy)
 app-logs backend
@@ -43,7 +44,7 @@ Dừng phần ứng dụng (giữ hạ tầng và dữ liệu): `app-down`. Dừ
 Không có dev-shell:
 
 ```powershell
-cd E:\IOT\iot-gas-monitor\deployment
+cd E:\iot-gassguard-monitor\deployment
 docker compose --env-file ..\.env --profile app up -d --build
 ```
 
