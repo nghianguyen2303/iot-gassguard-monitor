@@ -1,0 +1,19 @@
+.env
+*.log
+backend/target/
+frontend/node_modules/
+frontend/dist/
+firmware/**/secrets.h
+.idea/
+.vscode/
+__pycache__/
+# Mat khau thiet bi mo phong
+tests/simulator/devices.json
+# Chung chi TLS va khoa bi mat (tao bang deployment/certs/gen-certs.sh)
+deployment/certs/ca/
+deployment/certs/server/
+firmware/**/ca_cert.h
+*.key
+
+# Bản sao lưu CSDL (chứa dữ liệu thật)
+*.dump
