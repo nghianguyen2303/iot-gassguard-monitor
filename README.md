@@ -155,7 +155,7 @@ Các lệnh dưới đây viết cho **PowerShell trên Windows**, chạy từ t
 ### 5.2. Lấy mã nguồn và tạo file `.env`
 
 ```powershell
-git clone <URL-repo-GitHub-của-nhóm> iot-gas-monitor
+git clone https://github.com/nghianguyen2303/iot-gassguard-monitor.git iot-gas-monitor
 cd iot-gas-monitor
 Copy-Item .env.example .env
 notepad .env
@@ -369,6 +369,9 @@ Công thức quy đổi MQ-2 sang ppm dùng đường đặc tuyến LPG trong d
 
 | Thành viên | MSSV | GitHub | Phụ trách |
 |---|---|---|---|
-| … | … | … | … |
+| Đỗ Bình Minh | B23DCCN542 | DoBinhMinh | Phân tích bài toán, yêu cầu; phần cứng (linh kiện, lắp mạch, sơ đồ – `hardware/`); firmware ESP32 (`firmware/`); giao diện web React (`frontend/`); kiểm thử với ESP32 thật H1–H10 |
+| Nguyễn Đại Nghĩa | B23DCCN598 | [nghianguyen2303](https://github.com/nghianguyen2303) | Backend Spring Boot, cơ sở dữ liệu, API (`backend/`, `database/`); broker Mosquitto, TLS, Docker Compose (`deployment/`); kiểm thử tự động, thiết bị mô phỏng (`tests/`) |
 
-Repository: `<URL-repo-GitHub-của-nhóm>` · Phiên bản phát hành: `v1.0.0`
+Cả hai thành viên phối hợp: báo cáo, slide, video demo (`docs/`). Chi tiết mức tham gia từng hạng mục: Bảng 2 trong báo cáo.
+
+Repository: <https://github.com/nghianguyen2303/iot-gassguard-monitor> · Phiên bản phát hành: `v1.0.0`
