@@ -99,7 +99,7 @@ An toàn: chỉ xịt lượng gas rất nhỏ, ở nơi thoáng, tuyệt đối
 |---|---|
 | `Broker TỪ CHỐI (mã 5)` hoặc `(mã 4)` | Sai `DEVICE_ID`/`MQTT_PASSWORD`, hoặc thiết bị đang tạm ngưng / đã đổi mật khẩu. Cấp lại trên web |
 | `Không kết nối được broker (lỗi -3 ...)` | Sai `MQTT_HOST`, tường lửa chặn cổng 8883, mạng đang Public, Docker chưa chạy. Nếu máy chủ dùng cổng khác (`MQTT_TLS_PORT` trong `.env`, vd 8884) thì `MQTT_PORT` và luật tường lửa phải theo cổng đó |
-| `Lỗi TLS: ... verification failed` hoặc `CN mismatch` | `MQTT_HOST` không có trong chứng chỉ (chạy lại `gen-certs.sh` thêm IP đó, rồi `app-up`), hoặc `ca_cert.h` không khớp CA hiện tại (chép lại `ca_cert.h` và nạp lại) |
+| `Lỗi TLS: ... verification failed` hoặc `CN mismatch` | `MQTT_HOST` không có trong chứng chỉ (chạy lại `gen-certs.sh` thêm IP đó, rồi `dc restart mosquitto frontend`), hoặc `ca_cert.h` không khớp CA hiện tại (chép lại `ca_cert.h` và nạp lại) |
 | `Thieu ca_cert.h` khi biên dịch | Chưa chạy `gen-certs.sh` (file được ghi vào `firmware/gas-node/ca_cert.h`) |
 | Không thấy dòng `Kết nối MQTT` | TLS chờ đồng bộ giờ NTP trước; xem dòng `Chưa đồng bộ giờ NTP` |
 | LED xanh nháy nhanh mãi | Sai tên/mật khẩu WiFi hoặc WiFi 5 GHz |
