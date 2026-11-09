@@ -1,6 +1,7 @@
 # Kết quả kiểm thử với thiết bị thật (ESP32)
 
-Điền sau khi làm từng ca theo mục 6 của [test-plan.md](test-plan.md). Ảnh/video lưu trong `docs/images/tests/`
+Điền sau khi làm từng ca theo mục 6 của [test-plan.md](test-plan.md); phiếu làm từng bước:
+[hardware-test-checklist.md](hardware-test-checklist.md). Ảnh/video lưu trong `docs/images/tests/`
 (ví dụ `docs/images/tests/H3-dieu-khien.mp4`) và ghi đường dẫn vào cột Bằng chứng.
 
 - Ngày kiểm thử: …
