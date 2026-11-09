@@ -1,0 +1,5 @@
+# Thư viện cho bộ kiểm thử tự động (tests/e2e, tests/perf)
+paho-mqtt>=2.1,<3
+websocket-client>=1.7,<2
+# Tùy chọn: psutil – chỉ cần khi KHÔNG chạy hệ thống bằng Docker (P6 sẽ đo CPU/RAM theo tiến trình).
+# Khi chạy bằng Docker (app-up), P6 dùng `docker stats` nên không cần. Cài riêng nếu cần: pip install psutil
