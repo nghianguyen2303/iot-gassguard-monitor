@@ -21,4 +21,4 @@
 | H7 | Mất mạng, gửi bù | Đạt | Gửi bù 8 bản (seq 176–183, đo 11:49:04–11:50:31, nhận dồn 11:50:33) | | Không trùng seq |
 | H8 | Lỗi cảm biến | Đạt | Rút dây DATA → Serial "LỖI cảm biến temp: DS18B20 không phản hồi (đọc được -127)"; web: trạng thái "Lỗi cảm biến", cảnh báo FAULT 12:41:39; email sau 4,3 s (12:41:43) | | Cắm lại → FAULT → ONLINE lúc 12:42:49, cảnh báo tự trở lại bình thường, email CLEARED 12:42:56 |
 | H9 | Khóa / thu hồi | Đạt | Tạm khóa 12:45:55 (lý do "Test H9") → Serial "Broker TỪ CHỐI (mã 5)"; mở khóa 12:47:02 → tự kết nối lại ONLINE 12:47:23 (sau 21 s) | | Audit log: DEVICE_LIFECYCLE ACTIVE → SUSPENDED → ACTIVE |
-| H10 | Quá nhiệt | Chưa kiểm thử | Nhiệt độ đỉnh 29,19 °C | | Chưa đạt 45 °C |
+| H10 | Quá nhiệt | Chưa kiểm thử | Nhiệt độ đỉnh 55 °C | | Đạt |
