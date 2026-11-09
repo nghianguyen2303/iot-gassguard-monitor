@@ -16,9 +16,9 @@
 | H2 | Telemetry + realtime | Đạt | Độ trễ TB (tab Dữ liệu): ≈ 57 ms (1.432 bản ghi) | | Giá trị thô −238 ms do đồng hồ máy chủ (Windows/Docker) chậm 295 ms so với NTP; đã hiệu chỉnh |
 | H3 | Điều khiển quạt + còi | Đạt | Độ trễ lệnh: TB 86 ms (52–135 ms); 14/14 lệnh "Thành công" | | FAN_SET, BUZZER_SET, FAN_AUTO, BUZZER_AUTO |
 | H4 | Cấu hình từ xa | Đạt | Cấu hình v2 gửi 12:16:35.708 → "Đã áp dụng" 12:16:35.779 (71 ms); chu kỳ gửi 5,0 s → 3,0 s từ seq 486 | | Ngưỡng thử là 390 ppm (không phải 300 ppm) |
-| H5 | Cảnh báo gas | Đạt | Gas đỉnh: 10000 ppm (trần thang đo, 11:39:07); email sau … s | | Cảnh báo CRITICAL 11:37:36 ("3909,4 ppm > 1000 ppm"). Log gửi email bị mất do backend khởi động lại lúc 12:02 |
+| H5 | Cảnh báo gas | Đạt | Gas đỉnh: 10000 ppm (trần thang đo, 11:39:07); email sau ≤ 24 s (cảnh báo 11:37:36, Gmail nhận lúc 11:37) | | Cảnh báo CRITICAL 11:37:36 ("2259,9 ppm > 1000 ppm"); email CẢNH BÁO + NGHIÊM TRỌNG, email "trở lại bình thường" 11:52 |
 | H6 | Offline | Đạt | OFFLINE sau 27 s (bản tin cuối 12:19:14 → OFFLINE/LWT 12:19:41) | | ONLINE lại 12:20:51, cảnh báo OFFLINE tự xóa |
 | H7 | Mất mạng, gửi bù | Đạt | Gửi bù 8 bản (seq 176–183, đo 11:49:04–11:50:31, nhận dồn 11:50:33) | | Không trùng seq |
-| H8 | Lỗi cảm biến | Chưa kiểm thử | | | Chưa có cảnh báo FAULT/SENSOR_FAULT trong DB |
-| H9 | Khóa / thu hồi | Chưa kiểm thử | | | Chưa có thao tác khóa thiết bị trong audit log |
+| H8 | Lỗi cảm biến | Đạt | Rút dây DATA → Serial "LỖI cảm biến temp: DS18B20 không phản hồi (đọc được -127)"; web: trạng thái "Lỗi cảm biến", cảnh báo FAULT 12:41:39; email sau 4,3 s (12:41:43) | | Cắm lại → FAULT → ONLINE lúc 12:42:49, cảnh báo tự trở lại bình thường, email CLEARED 12:42:56 |
+| H9 | Khóa / thu hồi | Đạt | Tạm khóa 12:45:55 (lý do "Test H9") → Serial "Broker TỪ CHỐI (mã 5)"; mở khóa 12:47:02 → tự kết nối lại ONLINE 12:47:23 (sau 21 s) | | Audit log: DEVICE_LIFECYCLE ACTIVE → SUSPENDED → ACTIVE |
 | H10 | Quá nhiệt | Chưa kiểm thử | Nhiệt độ đỉnh 29,19 °C | | Chưa đạt 45 °C |
