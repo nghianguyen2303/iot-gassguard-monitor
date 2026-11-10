@@ -83,26 +83,30 @@ Lần chạy: 2026-11-08 23:37:34. Số liệu thô (từng mẫu): [`tests/repo
 
 ## 3. Kiểm thử với thiết bị thật (ESP32)
 
-Điền sau khi làm từng ca theo mục 6 của [test-plan.md](test-plan.md). Ảnh/video lưu trong `docs/images/tests/`
-(ví dụ `docs/images/tests/H3-dieu-khien.mp4`) và ghi đường dẫn vào cột Bằng chứng.
+Thực hiện theo mục 6 của [test-plan.md](test-plan.md) (phiếu làm: [hardware-test-checklist.md](hardware-test-checklist.md)).
+Chi tiết từng ca: [hardware-test-results.md](hardware-test-results.md).
 
-- Ngày kiểm thử: …
-- Người thực hiện: …
-- Firmware: 1.0.0 (`firmware/gas-node`), thiết bị: `esp32-001`
-- Mạng: WiFi 2.4 GHz …, IP máy chủ …
+- Ngày kiểm thử: 09/11/2026 (giờ Việt Nam, UTC+7). Người thực hiện: Đỗ Bình Minh.
+- Thiết bị: `esp32-001`, firmware 1.0.0 (`firmware/gas-node`), phần cứng theo [`hardware/`](../hardware/README.md).
+- Mạng: WiFi 2,4 GHz; máy chủ Docker tại 192.168.1.245 (MQTT/TLS cổng 8884, HTTPS 8443).
+- Nguồn số liệu: bảng `telemetry`, `commands`, `alerts`, `audit_logs` (PostgreSQL), log `iot-backend` và Serial Monitor.
 
-| Mã | Ca kiểm thử | Kết quả (Đạt / Không đạt) | Số liệu quan sát | Bằng chứng | Ghi chú |
-|---|---|---|---|---|---|
-| H1 | Kích hoạt thiết bị thật | | | | |
-| H2 | Telemetry + realtime | | Độ trễ TB (tab Dữ liệu): … ms | | |
-| H3 | Điều khiển quạt + còi | | Độ trễ lệnh: … ms | | |
-| H4 | Cấu hình từ xa | | | | |
-| H5 | Cảnh báo gas | | Gas đỉnh: … ppm; email sau … s | | |
-| H6 | Offline | | OFFLINE sau … s | | |
-| H7 | Mất mạng, gửi bù | | Gửi bù … bản | | |
-| H8 | Lỗi cảm biến | | | | |
-| H9 | Khóa / thu hồi | | | | |
-| H10 | Quá nhiệt | | Nhiệt độ đỉnh … °C | | |
+| Mã | Ca kiểm thử | Kết quả | Số liệu quan sát | Ghi chú |
+|---|---|---|---|---|
+| H1 | Kích hoạt thiết bị thật | ✅ Đạt | Tự kích hoạt 11:23:58 (PROVISIONED → ACTIVE khi nhận `status` ONLINE đầu tiên); web: ACTIVE, ONLINE, fw 1.0.0 | |
+| H2 | Telemetry + realtime | ✅ Đạt | Độ trễ TB ≈ 57 ms (1 432 bản ghi) | Giá trị thô −238 ms do đồng hồ máy chủ chậm 295 ms so với NTP; đã hiệu chỉnh |
+| H3 | Điều khiển quạt + còi | ✅ Đạt | 14/14 lệnh "Thành công"; độ trễ lệnh TB 86 ms (52–135 ms) | `FAN_SET`, `BUZZER_SET`, `FAN_AUTO`, `BUZZER_AUTO` |
+| H4 | Cấu hình từ xa | ✅ Đạt | Cấu hình v2 gửi 12:16:35.708 → "Đã áp dụng" 12:16:35.779 (71 ms); chu kỳ gửi 5,0 s → 3,0 s từ seq 486 | Ngưỡng thử 390 ppm |
+| H5 | Cảnh báo gas | ✅ Đạt | Gas đỉnh 10 000 ppm (trần thang đo, 11:39:07); cảnh báo CRITICAL 11:37:36; email đến sau ≤ 24 s | Email CẢNH BÁO + NGHIÊM TRỌNG; email "trở lại bình thường" 11:52 |
+| H6 | Offline | ✅ Đạt | OFFLINE sau 27 s (bản tin cuối 12:19:14 → LWT 12:19:41) | ONLINE lại 12:20:51, cảnh báo OFFLINE tự hết |
+| H7 | Mất mạng, gửi bù | ✅ Đạt | Gửi bù 8 bản (seq 176–183, đo 11:49:04–11:50:31, nhận dồn 11:50:33) | Không trùng `seq` |
+| H8 | Lỗi cảm biến | ✅ Đạt | Rút dây DATA DS18B20 → Serial "LỖI cảm biến temp …(-127)"; web "Lỗi cảm biến", cảnh báo FAULT 12:41:39; email sau 4,3 s | Cắm lại → ONLINE 12:42:49, cảnh báo tự hết, email 12:42:56 |
+| H9 | Khóa / thu hồi | ✅ Đạt | Tạm khóa 12:45:55 → Serial "Broker TỪ CHỐI (mã 5)"; mở khóa 12:47:02 → tự kết nối lại 12:47:23 (21 s) | Audit: `DEVICE_LIFECYCLE` ACTIVE → SUSPENDED → ACTIVE |
+| H10 | Quá nhiệt | ✅ Đạt | Nhiệt độ đỉnh 55 °C | Ngưỡng thiết kế: báo động tại chỗ > 45 °C, cảnh báo web > 50 °C |
+
+**Nhận xét.** 10/10 ca với thiết bị thật đạt. Độ trễ trung bình dashboard (57 ms) và lệnh điều khiển (86 ms) đều dưới
+100 ms; thiết bị bị rút nguồn được đánh dấu OFFLINE sau 27 s nhờ LWT của broker; 8 bản đo trong lúc mất kết nối được
+gửi bù đầy đủ, không trùng.
 
 ## 4. Đánh giá chung
 
