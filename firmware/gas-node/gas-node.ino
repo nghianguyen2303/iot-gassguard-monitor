@@ -90,6 +90,9 @@ uint32_t alarmClearedAtMs = 0;  // lúc hết báo động (để AUTO tắt qu�
 bool fanManual = false, fanManualOn = false;
 bool buzzerManual = false, buzzerManualOn = false;
 bool buzzerSounding = false;  // còi đang kêu (báo động hoặc bật tay)
+uint32_t buzzerMutedAtMs = 0;   // lúc người dùng tắt còi bằng tay (để tự hết hạn)
+bool buzzerPinOn = false;       // trạng thái thật đang xuất ra chân còi
+
 bool stateDirty = false;      // trạng thái quạt/còi vừa đổi -> gửi heartbeat ngay để web cập nhật
 uint32_t seqNo = 0;
 float mq2R0 = 0;              // kΩ
@@ -126,6 +129,17 @@ struct Reading {
   float gas, temp;
 };
 Reading offlineBuf[OFFLINE_BUFFER_SIZE];
+
+// Tác vụ an toàn (FreeRTOS) chạy song song với loop(): đo cảm biến, quyết định báo động, điều khiển còi/LED/quạt.
+// Nhờ vậy còi vẫn kêu đúng nhịp khi loop() bị chặn vì mạng (vd. đang chờ kết nối tới máy chủ đã mất).
+SemaphoreHandle_t stateMtx = nullptr;   // bảo vệ trạng thái dùng chung giữa tác vụ an toàn và loop()
+QueueHandle_t readingQ = nullptr;       // bản đo từ tác vụ an toàn -> loop() gửi đi / đưa vào bộ đệm
+volatile bool mqttUp = false;           // loop() cập nhật, tác vụ an toàn đọc để nháy LED xanh
+void updateIndicators();
+struct StateLock {
+  StateLock() { xSemaphoreTakeRecursive(stateMtx, portMAX_DELAY); }
+  ~StateLock() { xSemaphoreGiveRecursive(stateMtx); }
+};
 uint16_t bufHead = 0, bufCount = 0;
 uint32_t bufDropped = 0;
 
@@ -160,6 +174,21 @@ void logf(const char *fmt, ...) {
   vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
   Serial.printf("[%8.1fs] %s\n", millis() / 1000.0, buf);
+}
+
+// Xuất ra chân còi. BUZZER_TONE_HZ > 0: phát xung (kêu được cả còi thụ động)
+void buzzerOutput(bool on) {
+  if (on == buzzerPinOn) return;
+  buzzerPinOn = on;
+#if BUZZER_TONE_HZ > 0
+  if (on) tone(PIN_BUZZER, BUZZER_TONE_HZ);
+  else {
+    noTone(PIN_BUZZER);
+    digitalWrite(PIN_BUZZER, LOW);
+  }
+#else
+  digitalWrite(PIN_BUZZER, on ? HIGH : LOW);
+#endif
 }
 
 bool timeValid() { return time(nullptr) > 1704067200; }  // sau 01/01/2024 => đã đồng bộ NTP
@@ -208,6 +237,10 @@ void loadPrefs() {
   fanManualOn = prefs.getBool("fanOn", false);
   buzzerManual = prefs.getBool("buzMan", false);
   buzzerManualOn = prefs.getBool("buzOn", false);
+  if (buzzerManual && !buzzerManualOn && BUZZER_MUTE_SEC > 0) {
+    buzzerManual = false;  // tắt còi tạm thời không giữ qua lần khởi động lại -> về TỰ ĐỘNG
+    prefs.putBool("buzMan", false);
+  }
   if (MQ2_R0_KOHM > 0) {
     mq2R0 = MQ2_R0_KOHM;
   } else if (!MQ2_FORCE_CALIBRATE) {
@@ -405,17 +438,32 @@ void syncEvents() {
   if (!mqtt.connected() || !timeValid()) return;
   SensorHealth *list[] = {&gasHealth, &tempHealth};
   for (SensorHealth *h : list) {
-    if (h->faulty == h->reportedFaulty) continue;
+    bool faulty;
+    String err;
+    {
+      StateLock lock;
+      if (h->faulty == h->reportedFaulty) continue;
+      faulty = h->faulty;
+      err = h->lastError;
+    }
     JsonDocument doc;
     doc["deviceId"] = DEVICE_ID;
     doc["ts"] = nowMs();
-    doc["type"] = h->faulty ? "SENSOR_FAULT" : "SENSOR_OK";
+    doc["type"] = faulty ? "SENSOR_FAULT" : "SENSOR_OK";
     doc["sensor"] = h->name;
-    doc["message"] = h->faulty ? h->lastError : String("Cảm biến hoạt động lại");
-    if (publishJson("event", doc, 1)) h->reportedFaulty = h->faulty;
+    doc["message"] = faulty ? err : String("Cảm biến hoạt động lại");
+    if (publishJson("event", doc, 1)) {
+      StateLock lock;
+      h->reportedFaulty = faulty;
+    }
   }
-  while (eventCount > 0) {
-    PendingEvent &ev = eventQueue[eventHead];
+  for (;;) {
+    PendingEvent ev;
+    {
+      StateLock lock;
+      if (eventCount == 0) return;
+      ev = eventQueue[eventHead];
+    }
     JsonDocument doc;
     doc["deviceId"] = DEVICE_ID;
     doc["ts"] = ev.ts ? ev.ts : nowMs();
@@ -425,8 +473,11 @@ void syncEvents() {
     else if (strcmp(ev.reason, "GAS") == 0) doc["gas"] = serialized(String(ev.value, 1));
     if (strcmp(ev.reason, "CLEARED") != 0) doc["threshold"] = serialized(String(ev.threshold, 1));
     if (!publishJson("event", doc, 1)) return;
-    eventHead = (eventHead + 1) % EVENT_QUEUE;
-    eventCount--;
+    StateLock lock;
+    if (eventCount > 0) {
+      eventHead = (eventHead + 1) % EVENT_QUEUE;
+      eventCount--;
+    }
   }
 }
 
@@ -461,6 +512,14 @@ void applyActuators(float gas, float temp) {
       logf("Hết báo động %d giây -> TỰ TẮT QUẠT", FAN_AUTO_OFF_DELAY_SEC);
     }
   }
+  if (buzzerManual && !buzzerManualOn && BUZZER_MUTE_SEC > 0 && buzzerMutedAtMs != 0 &&
+      millis() - buzzerMutedAtMs >= BUZZER_MUTE_SEC * 1000UL) {
+    buzzerManual = false;
+    buzzerMutedAtMs = 0;
+    saveModes();
+    stateDirty = true;
+    logf("Hết %d giây tắt còi -> còi về TỰ ĐỘNG", BUZZER_MUTE_SEC);
+  }
   bool sound = buzzerManual ? buzzerManualOn : alarm;
   if (sound != buzzerSounding) {
     buzzerSounding = sound;
@@ -469,7 +528,7 @@ void applyActuators(float gas, float temp) {
 }
 
 // ============================================================================ Đo + luật tại thiết bị
-void measureAndSend() {
+void senseAndDecide() {
   float gas = readGasPpm();
   float temp = readTempC();
   bool hasGas = !isnan(gas), hasTemp = !isnan(temp);
@@ -498,8 +557,37 @@ void measureAndSend() {
     return;
   }
   Reading r = {++seqNo, nowMs(), hasGas, hasTemp, hasGas ? gas : 0, hasTemp ? temp : 0};
-  if (mqtt.connected() && bufCount == 0 && sendReading(r)) return;
-  bufferReading(r);  // mất kết nối, hoặc còn bản cũ chưa gửi -> giữ đúng thứ tự
+  if (xQueueSend(readingQ, &r, 0) != pdTRUE) {  // loop() đang bị chặn lâu -> bỏ bản cũ nhất trong hàng
+    Reading old;
+    xQueueReceive(readingQ, &old, 0);
+    xQueueSend(readingQ, &r, 0);
+  }
+}
+
+// loop(): lấy bản đo từ tác vụ an toàn, gửi ngay nếu được, không thì đưa vào bộ đệm mất mạng
+void sendPendingReadings() {
+  Reading r;
+  while (xQueueReceive(readingQ, &r, 0) == pdTRUE) {
+    if (mqtt.connected() && bufCount == 0 && sendReading(r)) continue;
+    bufferReading(r);  // mất kết nối, hoặc còn bản cũ chưa gửi -> giữ đúng thứ tự
+  }
+}
+
+void safetyTask(void *) {
+  uint32_t lastSenseMs = 0;
+  bool first = true;
+  for (;;) {
+    {
+      StateLock lock;
+      if (first || millis() - lastSenseMs >= cfg.intervalSec * 1000UL) {
+        senseAndDecide();
+        lastSenseMs = millis();  // tính từ lúc đo xong (lần đầu có thể mất vài giây để hiệu chuẩn)
+        first = false;
+      }
+      updateIndicators();
+    }
+    vTaskDelay(pdMS_TO_TICKS(20));
+  }
 }
 
 // ============================================================================ Lệnh điều khiển
@@ -527,6 +615,7 @@ void handleCommand(const String &payload) {
   const char *result = "FAILED";
   String message;
   JsonVariant on = cmd["params"]["on"];
+  xSemaphoreTakeRecursive(stateMtx, portMAX_DELAY);
   if (action == "FAN_SET" || action == "BUZZER_SET") {
     if (on.is<bool>()) {
       bool v = on.as<bool>();
@@ -537,7 +626,10 @@ void handleCommand(const String &payload) {
       } else {
         buzzerManual = true;
         buzzerManualOn = v;
-        message = v ? "Còi BẬT (kêu đến khi tắt)" : "Còi TẮT (im lặng, kể cả khi có báo động)";
+        buzzerMutedAtMs = v ? 0 : (millis() ? millis() : 1);
+        if (v) message = "Còi BẬT (kêu đến khi tắt)";
+        else if (BUZZER_MUTE_SEC > 0) message = "Còi TẮT " + String(BUZZER_MUTE_SEC / 60) + " phút, sau đó tự về TỰ ĐỘNG";
+        else message = "Còi TẮT (im lặng, kể cả khi có báo động)";
       }
       saveModes();
       applyActuators(NAN, NAN);
@@ -547,7 +639,10 @@ void handleCommand(const String &payload) {
     }
   } else if (action == "FAN_AUTO" || action == "BUZZER_AUTO") {
     if (action == "FAN_AUTO") fanManual = false;
-    else buzzerManual = false;
+    else {
+      buzzerManual = false;
+      buzzerMutedAtMs = 0;
+    }
     saveModes();
     applyActuators(NAN, NAN);
     result = "SUCCESS";
@@ -560,6 +655,7 @@ void handleCommand(const String &payload) {
   } else {
     message = "Không hỗ trợ lệnh '" + action + "'";
   }
+  xSemaphoreGiveRecursive(stateMtx);
   logf("Lệnh %s (%s) -> %s: %s", action.c_str(), id.substring(0, 8).c_str(), result, message.c_str());
 
   JsonDocument ack;
@@ -607,6 +703,7 @@ void handleConfig(const String &payload) {
     logf("TỪ CHỐI cấu hình: %s", errors.c_str());
   } else {
     // Retained config được giao lại mỗi lần kết nối -> áp dụng lại là vô hại
+    StateLock lock;
     if (!iv.isNull()) cfg.intervalSec = iv.as<long>();
     if (!thr.isNull()) cfg.gasThreshold = thr.as<float>();
     if (!af.isNull()) cfg.autoFan = af.as<bool>();
@@ -690,7 +787,7 @@ void updateIndicators() {
   uint32_t ms = millis();
   bool green;
   if (WiFi.status() != WL_CONNECTED) green = (ms / 150) % 2;  // nháy nhanh: chưa có WiFi
-  else if (!mqtt.connected()) green = (ms / 600) % 2;         // nháy chậm: có WiFi, chưa vào broker
+  else if (!mqttUp) green = (ms / 600) % 2;         // nháy chậm: có WiFi, chưa vào broker
   else green = true;                                          // sáng: online
   digitalWrite(PIN_LED_GREEN, green ? HIGH : LOW);
 
@@ -699,13 +796,15 @@ void updateIndicators() {
   else if (gasHealth.faulty || tempHealth.faulty) red = (ms / 1000) % 2;  // cảm biến lỗi: đỏ nháy chậm
   bool buzz = BUZZER_ENABLED && buzzerSounding && (ms / 400) % 2;        // còi kêu ngắt quãng
   digitalWrite(PIN_LED_RED, red ? HIGH : LOW);
-  digitalWrite(PIN_BUZZER, buzz ? HIGH : LOW);
+  buzzerOutput(buzz);
 }
 
 // ============================================================================ setup / loop
 void setup() {
   Serial.begin(115200);
   delay(200);
+  stateMtx = xSemaphoreCreateRecursiveMutex();
+  readingQ = xQueueCreate(12, sizeof(Reading));
   bootMs = millis();
   setFan(false);  // quạt tắt ngay khi khởi động
   pinMode(PIN_LED_GREEN, OUTPUT);
@@ -715,16 +814,19 @@ void setup() {
   // Tự kiểm tra: 2 LED sáng + còi bíp ngắn => mạch LED/còi nối đúng
   digitalWrite(PIN_LED_GREEN, HIGH);
   digitalWrite(PIN_LED_RED, HIGH);
-  if (BUZZER_ENABLED) digitalWrite(PIN_BUZZER, HIGH);
-  delay(150);
-  digitalWrite(PIN_BUZZER, LOW);
-  delay(350);
+  if (BUZZER_ENABLED) buzzerOutput(true);
+  delay(300);
+  buzzerOutput(false);
+  delay(200);
   digitalWrite(PIN_LED_GREEN, LOW);
   digitalWrite(PIN_LED_RED, LOW);
   analogReadResolution(12);
   analogSetPinAttenuation(PIN_MQ2_AO, ADC_11db);  // đọc được tới ~3.1V
 
   logf("GasGuard gas node %s | thiết bị %s", FW_VERSION, DEVICE_ID);
+  logf("Còi: chân D%d, %s, tắt tay tối đa %d giây", PIN_BUZZER,
+       BUZZER_TONE_HZ > 0 ? ("phát xung " + String(BUZZER_TONE_HZ) + " Hz").c_str() : "mức HIGH/LOW (còi chủ động)",
+       BUZZER_MUTE_SEC);
   loadPrefs();
 
   ds.begin();
@@ -752,11 +854,12 @@ void setup() {
   mqtt.onMessage(onMqttMessage);
   applyActuators(NAN, NAN);  // áp dụng chế độ tay đã lưu (vd. người dùng đã giữ quạt BẬT)
   logf("MQ-2 đang làm nóng %d giây...", MQ2_WARMUP_SEC);
+  // Tác vụ an toàn ưu tiên cao hơn loop(): đo + báo động + còi/LED không phụ thuộc mạng
+  xTaskCreatePinnedToCore(safetyTask, "safety", 8192, nullptr, 2, nullptr, ARDUINO_RUNNING_CORE);
 }
 
 void loop() {
   uint32_t ms = millis();
-  updateIndicators();
 
   if (WiFi.status() != WL_CONNECTED) {
     if (wifiUp) {
@@ -798,15 +901,13 @@ void loop() {
 
   mqtt.loop();  // nhận bản tin + giữ kết nối (keepalive)
   bool connectedNow = mqtt.connected();
+  mqttUp = connectedNow;
   if (wasMqttConnected && !connectedNow) logf("Mất kết nối broker -> đo vẫn chạy, lưu đệm tối đa %d bản", OFFLINE_BUFFER_SIZE);
   wasMqttConnected = connectedNow;
 
   processInbox();
 
-  if (ms - lastTelemetryMs >= cfg.intervalSec * 1000UL) {
-    measureAndSend();
-    lastTelemetryMs = millis();  // tính từ lúc đo xong (lần đầu có thể mất vài giây để hiệu chuẩn)
-  }
+  sendPendingReadings();  // đo + báo động do tác vụ an toàn làm, loop() chỉ lo gửi
   if (connectedNow) {
     flushBuffer(5);
     syncEvents();

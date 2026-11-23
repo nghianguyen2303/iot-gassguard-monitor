@@ -5,7 +5,7 @@
 // ============================================================================
 #pragma once
 
-#define FW_VERSION "1.0.0"
+#define FW_VERSION "1.1.0"
 #define HW_VERSION "esp32-devkit-mq2-ds18b20"
 
 // ---------------------------------------------------------------- Chân nối
@@ -28,6 +28,12 @@
 #define PIN_BUZZER        25
 // 1 = còi kêu ngắt quãng khi gas vượt ngưỡng (kể cả khi mất mạng). 0 = tắt còi
 #define BUZZER_ENABLED    1
+// Tần số phát cho còi (Hz). >0 = phát xung vuông: kêu được cả còi THỤ ĐỘNG lẫn còi CHỦ ĐỘNG.
+// 0 = chỉ cấp mức HIGH/LOW (chỉ còi CHỦ ĐỘNG mới kêu).
+#define BUZZER_TONE_HZ    2700
+// Tắt còi bằng tay (lệnh BUZZER_SET off) chỉ có hiệu lực trong số giây này, hết hạn tự về TỰ ĐỘNG.
+// Không giữ qua lần khởi động lại. 0 = giữ tắt mãi (hành vi cũ).
+#define BUZZER_MUTE_SEC   300
 
 // ---------------------------------------------------------------- Cảm biến MQ-2
 // Module MQ-2 nuôi 5V -> chân AO ra tới 5V, ESP32 chỉ chịu 3.3V: DÙNG CẦU PHÂN ÁP.
