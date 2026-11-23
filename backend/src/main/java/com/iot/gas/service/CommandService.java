@@ -70,7 +70,7 @@ public class CommandService {
     // ====================================================================== Gửi lệnh
     /** waitMs > 0: chờ tối đa waitMs (≤ 12 s) để trả về luôn kết quả ACK. */
     public CommandDto send(AuthUser user, String code, SendCommandRequest req, long waitMs) {
-        Device device = deviceService.loadForManage(user, code);       // VIEWER / người ngoài -> 403
+        Device device = deviceService.loadForControl(user, code);      // VIEWER / người ngoài -> 403
         Map<String, Object> params = validate(req);
         if (!CONTROLLABLE.contains(device.getLifecycleStatus())) {
             throw new ApiException(HttpStatus.CONFLICT, "DEVICE_NOT_CONTROLLABLE",

@@ -17,14 +17,15 @@ public record DeviceDto(Long id, String deviceCode, String name, String deviceTy
                         ConfigStatus configStatus, String configMessage, Instant configAckedAt,
                         Map<String, Object> actuatorState,
                         Instant createdAt, Instant updatedAt, Instant decommissionedAt,
-                        boolean canManage, List<String> allowedActions) {
+                        boolean canManage, boolean canControl, List<String> allowedActions) {
 
-    public static DeviceDto from(Device d, String ownerUsername, boolean canManage, List<String> allowedActions) {
+    public static DeviceDto from(Device d, String ownerUsername, boolean canManage, boolean canControl,
+                                 List<String> allowedActions) {
         return new DeviceDto(d.getId(), d.getDeviceCode(), d.getName(), d.getDeviceType(), d.getLocation(), d.getZone(),
                 d.getOwnerId(), ownerUsername, d.getLifecycleStatus(), d.getConnectivity(), d.getLastSeenAt(),
                 d.getHwVersion(), d.getFwVersion(), d.getConfig(), d.getConfigVersion(), d.getConfigAppliedVersion(),
                 d.getConfigStatus(), d.getConfigMessage(), d.getConfigAckedAt(),
                 d.getActuatorState(), d.getCreatedAt(), d.getUpdatedAt(), d.getDecommissionedAt(),
-                canManage, canManage ? allowedActions : List.of());
+                canManage, canControl, canManage ? allowedActions : List.of());
     }
 }

@@ -65,7 +65,7 @@ export default function DevicesPage() {
                 <td className="small mono">{d.fwVersion || '—'}</td>
                 <td className="small">v{d.configAppliedVersion}/{d.configVersion} <Badge value={d.configStatus} /></td>
                 {isAdmin && <td>{d.ownerUsername}</td>}
-                <td className="small">{d.canManage ? 'Quản lý' : 'Chỉ xem'}</td>
+                <td className="small">{d.canManage ? 'Quản lý' : d.canControl ? 'Điều khiển' : 'Chỉ xem'}</td>
               </tr>
             ))}</tbody>
           </table></div>

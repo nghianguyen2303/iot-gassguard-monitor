@@ -104,6 +104,14 @@ public class DeviceService {
         return d;
     }
 
+    /** Gửi lệnh điều khiển (quạt, còi): ADMIN, hoặc OWNER là chủ / được chia sẻ. */
+    @Transactional(readOnly = true)
+    public Device loadForControl(AuthUser user, String code) {
+        Device d = load(code);
+        access.requireControl(user, d);
+        return d;
+    }
+
     @Transactional(readOnly = true)
     public Device loadForManage(AuthUser user, String code) {
         Device d = load(code);
@@ -368,7 +376,7 @@ public class DeviceService {
     }
 
     private DeviceDto toDto(AuthUser user, Device d, String ownerUsername) {
-        return DeviceDto.from(d, ownerUsername, access.canManage(user, d),
+        return DeviceDto.from(d, ownerUsername, access.canManage(user, d), access.canControl(user, d),
                 DeviceLifecycle.allowedActions(d.getLifecycleStatus()));
     }
 

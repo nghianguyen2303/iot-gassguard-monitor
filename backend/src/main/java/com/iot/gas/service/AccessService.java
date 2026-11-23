@@ -12,7 +12,9 @@ import org.springframework.stereotype.Service;
  * Kiểm tra quyền trên TỪNG thiết bị (mục 4.5: chỉ truy cập thiết bị/dữ liệu trong phạm vi được cấp).
  * <ul>
  *   <li>Xem: ADMIN, chủ sở hữu, hoặc người được chia sẻ.</li>
- *   <li>Quản lý/điều khiển: ADMIN, hoặc chủ sở hữu có vai trò OWNER.</li>
+ *   <li>Điều khiển (bật/tắt quạt, còi; xác nhận, xử lý cảnh báo): ADMIN, hoặc tài khoản vai trò OWNER
+ *       là chủ thiết bị hoặc được chia sẻ thiết bị. VIEWER luôn chỉ xem.</li>
+ *   <li>Quản lý (cấu hình, vòng đời, xác thực MQTT, chia sẻ): ADMIN, hoặc chủ sở hữu có vai trò OWNER.</li>
  * </ul>
  * Vi phạm -> AccessDeniedException -> 403 + audit DENIED (GlobalExceptionHandler).
  */
@@ -30,6 +32,16 @@ public class AccessService {
 
     public boolean canManage(AuthUser user, Device device) {
         return user.isAdmin() || (user.role() == Role.OWNER && device.getOwnerId().equals(user.id()));
+    }
+
+    public boolean canControl(AuthUser user, Device device) {
+        return user.isAdmin() || (user.role() == Role.OWNER && canView(user, device));
+    }
+
+    public void requireControl(AuthUser user, Device device) {
+        if (!canControl(user, device)) {
+            throw new AccessDeniedException("Không có quyền điều khiển thiết bị " + device.getDeviceCode());
+        }
     }
 
     public void requireView(AuthUser user, Device device) {

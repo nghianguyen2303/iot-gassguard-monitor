@@ -12,31 +12,32 @@ Vi phạm trả về HTTP 403 và ghi audit log `DENIED`.
 | `OWNER` | Chủ hộ, chủ nhà trọ, quản lý bếp: sở hữu và quản lý thiết bị của mình | ADMIN tạo tài khoản hoặc đổi vai trò |
 | `VIEWER` | Người thân, người thuê phòng: chỉ xem thiết bị được chia sẻ | Mặc định khi tự đăng ký |
 
-Quyền **quản lý** một thiết bị = ADMIN, hoặc tài khoản vai trò OWNER **và** là chủ của thiết bị đó. Quyền **xem** = ADMIN,
-chủ thiết bị, hoặc người được chia sẻ. Một OWNER được chia sẻ thiết bị của người khác chỉ được xem thiết bị đó.
+Quyền **quản lý** một thiết bị = ADMIN, hoặc tài khoản vai trò OWNER **và** là chủ của thiết bị đó. Quyền **điều khiển**
+(bật/tắt quạt, còi; xác nhận, xử lý cảnh báo) = ADMIN, hoặc tài khoản vai trò OWNER là chủ **hoặc được chia sẻ** thiết bị.
+Quyền **xem** = ADMIN, chủ thiết bị, hoặc người được chia sẻ. VIEWER được chia sẻ chỉ được xem.
 
 ## 2. Ma trận quyền trên một thiết bị
 
 Ký hiệu: ✅ được phép · ❌ bị từ chối (HTTP 403). "Được chia sẻ" áp dụng cho người được chia sẻ quyền xem, bất kể vai
 trò. Người không có quan hệ gì với thiết bị: không thấy thiết bị trong danh sách, mọi API của thiết bị trả 403.
 
-| Chức năng | Được chia sẻ | OWNER (chủ thiết bị) | ADMIN | Kiểm tra trong code |
-|---|---|---|---|---|
-| Xem thông tin, trạng thái thiết bị | ✅ | ✅ | ✅ (mọi thiết bị) | `DeviceService.get` → `requireView` |
-| Xem dữ liệu: mới nhất, bảng, biểu đồ, thống kê | ✅ | ✅ | ✅ | `TelemetryQueryService` → `loadForView` |
-| Xuất CSV (ghi audit `DATA_EXPORT`) | ✅ | ✅ | ✅ | `TelemetryQueryService.exportCsv` |
-| Nhận dữ liệu realtime (WebSocket) | ✅ | ✅ | ✅ | `StompAuthInterceptor` → `canView` khi đăng ký kênh |
-| Xem cảnh báo | ✅ | ✅ | ✅ | `AlertService.list` |
-| **Xác nhận, xử lý cảnh báo** | ❌ | ✅ | ✅ | `AlertService.loadForHandle` → `requireManage` |
-| Xem cấu hình, lịch sử lệnh, nhật ký hoạt động | ✅ | ✅ | ✅ | `ConfigService.get`, `CommandService.history`, `AuditQueryService.deviceActivity` |
-| **Gửi lệnh điều khiển** (quạt, còi) | ❌ | ✅ | ✅ | `CommandService.send` → `loadForManage` |
-| **Đổi cấu hình từ xa** | ❌ | ✅ | ✅ | `ConfigService.update` → `loadForManage` |
-| **Sửa thông tin** (tên, vị trí, khu vực) | ❌ | ✅ | ✅ | `DeviceService.update` → `loadForManage` |
-| **Cấp, đổi mật khẩu MQTT; xem lịch sử xác thực** | ❌ | ✅ | ✅ | `DeviceService.provision`, `rotateCredentials`, `credentialHistory` |
-| **Vòng đời:** kích hoạt, bảo trì, tạm khóa, mở khóa, ngừng sử dụng | ❌ | ✅ | ✅ | `DeviceService.changeLifecycle` → `loadForManage` |
-| **Chia sẻ, thu hồi chia sẻ, xem danh sách chia sẻ** | ❌ | ✅ | ✅ | `DeviceService.addShare` / `removeShare` / `listShares` |
-| Xem luật cảnh báo áp dụng cho thiết bị | ✅ | ✅ | ✅ | `AlertRuleService.list` → `requireView` |
-| **Tạo, sửa, xóa luật cảnh báo riêng của thiết bị** | ❌ | ✅ | ✅ | `AlertRuleService` → `requireManage` |
+| Chức năng | VIEWER được chia sẻ | OWNER được chia sẻ | OWNER (chủ thiết bị) | ADMIN | Kiểm tra trong code |
+|---|---|---|---|---|---|
+| Xem thông tin, trạng thái thiết bị | ✅ | ✅ | ✅ | ✅ (mọi thiết bị) | `DeviceService.get` → `requireView` |
+| Xem dữ liệu: mới nhất, bảng, biểu đồ, thống kê | ✅ | ✅ | ✅ | ✅ | `TelemetryQueryService` → `loadForView` |
+| Xuất CSV (ghi audit `DATA_EXPORT`) | ✅ | ✅ | ✅ | ✅ | `TelemetryQueryService.exportCsv` |
+| Nhận dữ liệu realtime (WebSocket) | ✅ | ✅ | ✅ | ✅ | `StompAuthInterceptor` → `canView` khi đăng ký kênh |
+| Xem cảnh báo | ✅ | ✅ | ✅ | ✅ | `AlertService.list` |
+| **Xác nhận, xử lý cảnh báo** | ❌ | ✅ | ✅ | ✅ | `AlertService.loadForHandle` → `requireControl` |
+| Xem cấu hình, lịch sử lệnh, nhật ký hoạt động | ✅ | ✅ | ✅ | ✅ | `ConfigService.get`, `CommandService.history`, `AuditQueryService.deviceActivity` |
+| **Gửi lệnh điều khiển** (quạt, còi) | ❌ | ✅ | ✅ | ✅ | `CommandService.send` → `loadForControl` |
+| **Đổi cấu hình từ xa** | ❌ | ❌ | ✅ | ✅ | `ConfigService.update` → `loadForManage` |
+| **Sửa thông tin** (tên, vị trí, khu vực) | ❌ | ❌ | ✅ | ✅ | `DeviceService.update` → `loadForManage` |
+| **Cấp, đổi mật khẩu MQTT; xem lịch sử xác thực** | ❌ | ❌ | ✅ | ✅ | `DeviceService.provision`, `rotateCredentials`, `credentialHistory` |
+| **Vòng đời:** kích hoạt, bảo trì, tạm khóa, mở khóa, ngừng sử dụng | ❌ | ❌ | ✅ | ✅ | `DeviceService.changeLifecycle` → `loadForManage` |
+| **Chia sẻ, thu hồi chia sẻ, xem danh sách chia sẻ** | ❌ | ❌ | ✅ | ✅ | `DeviceService.addShare` / `removeShare` / `listShares` |
+| Xem luật cảnh báo áp dụng cho thiết bị | ✅ | ✅ | ✅ | ✅ | `AlertRuleService.list` → `requireView` |
+| **Tạo, sửa, xóa luật cảnh báo riêng của thiết bị** | ❌ | ❌ | ✅ | ✅ | `AlertRuleService` → `requireManage` |
 
 ## 3. Ma trận quyền chung của hệ thống
 
@@ -69,7 +70,7 @@ trò. Người không có quan hệ gì với thiết bị: không thấy thiế
 
 1. **Theo URL** (`SecurityConfig`): chỉ đăng nhập, đăng ký là công khai; `/api/admin/**` chỉ ADMIN; còn lại phải có JWT hợp lệ.
 2. **Theo vai trò trên từng API** (`@PreAuthorize`): đăng ký thiết bị, quản lý người dùng, thống kê hệ thống.
-3. **Theo từng thiết bị** (`AccessService.requireView` / `requireManage`): mọi API có `{code}`, cảnh báo, luật cảnh báo.
+3. **Theo từng thiết bị** (`AccessService.requireView` / `requireControl` / `requireManage`): mọi API có `{code}`, cảnh báo, luật cảnh báo.
 4. **Kênh realtime** (`StompAuthInterceptor`): JWT khi kết nối WebSocket, quyền xem khi đăng ký kênh của một thiết bị.
 5. **Broker** (Mosquitto Dynamic Security): ACL theo topic cho từng tài khoản thiết bị.
 

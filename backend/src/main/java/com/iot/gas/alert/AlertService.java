@@ -291,7 +291,7 @@ public class AlertService {
     private Alert loadForHandle(AuthUser user, Long id) {
         Alert a = alerts.findById(id).orElseThrow(() -> ApiException.notFound("Không tìm thấy cảnh báo"));
         Device d = devices.findById(a.getDeviceId()).orElseThrow();
-        access.requireManage(user, d);                                    // VIEWER chỉ xem, không xử lý
+        access.requireControl(user, d);                                   // VIEWER chỉ xem, không xử lý
         return a;
     }
 
@@ -390,7 +390,7 @@ public class AlertService {
                 .collect(Collectors.toMap(User::getId, User::getUsername));
         return list.stream().map(a -> {
             Device d = devs.get(a.getDeviceId());
-            boolean canHandle = d != null && access.canManage(user, d);
+            boolean canHandle = d != null && access.canControl(user, d);
             return new AlertDto(a.getId(), a.getDeviceId(), d == null ? null : d.getDeviceCode(),
                     d == null ? null : d.getName(), a.getRuleId(), a.getRuleId() == null ? null : ruleNames.get(a.getRuleId()),
                     a.getType(), a.getSeverity(), a.getMessage(), a.getMetric(), a.getValue(), a.getStatus(),

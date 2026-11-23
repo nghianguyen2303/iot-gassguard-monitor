@@ -55,7 +55,8 @@ export default function DeviceDetailPage() {
           <div className="row" style={{ marginTop: 8 }}>
             <Badge value={device.lifecycleStatus} />
             <Badge value={device.connectivity} />
-            {!device.canManage && <Badge value="VIEWER" label="Bạn chỉ có quyền xem" />}
+            {!device.canControl && <Badge value="VIEWER" label="Bạn chỉ có quyền xem" />}
+            {device.canControl && !device.canManage && <Badge value="OWNER" label="Được điều khiển (thiết bị được chia sẻ)" />}
           </div>
         </div>
       </div>

@@ -58,13 +58,13 @@ export default function ControlTab({ device }) {
   const controllable = ['ACTIVE', 'MAINTENANCE'].includes(device.lifecycleStatus);
   const online = device.connectivity !== 'OFFLINE';
   const st = device.actuatorState || {};
-  const disabled = !device.canManage || !!busy;
+  const disabled = !device.canControl || !!busy;
 
   return (
     <div className="stack">
-      {!device.canManage && <Notice kind="info">Bạn chỉ có quyền <b>xem</b> thiết bị này nên không thể gửi lệnh (backend sẽ từ chối với mã 403).</Notice>}
-      {device.canManage && !controllable && <Notice kind="warning">Thiết bị đang <b>{device.lifecycleStatus}</b>, chỉ nhận lệnh khi Hoạt động hoặc Bảo trì.</Notice>}
-      {device.canManage && controllable && !online && <Notice kind="warning">Thiết bị đang <b>mất kết nối</b>; lệnh sẽ bị từ chối (409) và được ghi vào lịch sử.</Notice>}
+      {!device.canControl && <Notice kind="info">Bạn chỉ có quyền <b>xem</b> thiết bị này nên không thể gửi lệnh (backend sẽ từ chối với mã 403).</Notice>}
+      {device.canControl && !controllable && <Notice kind="warning">Thiết bị đang <b>{device.lifecycleStatus}</b>, chỉ nhận lệnh khi Hoạt động hoặc Bảo trì.</Notice>}
+      {device.canControl && controllable && !online && <Notice kind="warning">Thiết bị đang <b>mất kết nối</b>; lệnh sẽ bị từ chối (409) và được ghi vào lịch sử.</Notice>}
       <ErrorBox error={error} />
 
       <div className="grid-2">
